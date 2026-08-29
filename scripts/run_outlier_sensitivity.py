@@ -68,16 +68,17 @@ def mark_crossing_trades(trades: pd.DataFrame, lookup: dict[str, np.ndarray]) ->
     t["exit_date"] = pd.to_datetime(t["exit_date"], errors="coerce").dt.normalize()
     t["_instrument_id"] = _instrument_ids(t)
 
-    def crosses(row) -> bool:
-        dates = lookup.get(row._instrument_id)
-        if dates is None or len(dates) == 0 or pd.isna(row.signal_date) or pd.isna(row.exit_date):
-            return False
-        start = np.datetime64(row.signal_date.to_datetime64())
-        end = np.datetime64(row.exit_date.to_datetime64())
+    flags: list[bool] = []
+    for instrument, signal_date, exit_date in zip(t["_instrument_id"], t["signal_date"], t["exit_date"]):
+        dates = lookup.get(instrument)
+        if dates is None or len(dates) == 0 or pd.isna(signal_date) or pd.isna(exit_date):
+            flags.append(False)
+            continue
+        start = np.datetime64(signal_date.to_datetime64())
+        end = np.datetime64(exit_date.to_datetime64())
         pos = int(np.searchsorted(dates, start, side="left"))
-        return pos < len(dates) and dates[pos] <= end
-
-    t["crosses_extreme_move"] = [crosses(row) for row in t.itertuples(index=False)]
+        flags.append(pos < len(dates) and dates[pos] <= end)
+    t["crosses_extreme_move"] = flags
     return t
 
 
@@ -89,6 +90,24 @@ def _portfolio_fields(prefix: str, metrics) -> dict:
         f"{prefix}_accepted_trades": metrics.accepted_trades,
         f"{prefix}_skipped_trades": metrics.skipped_trades,
     }
+
+
+def _markdown_table(frame: pd.DataFrame, columns: list[str]) -> str:
+    header = "| " + " | ".join(columns) + " |"
+    sep = "| " + " | ".join(["---"] * len(columns)) + " |"
+    rows = []
+    for _, row in frame[columns].iterrows():
+        values = []
+        for col in columns:
+            value = row[col]
+            if pd.isna(value):
+                values.append("")
+            elif isinstance(value, (float, np.floating)):
+                values.append(f"{float(value):.4f}")
+            else:
+                values.append(str(value))
+        rows.append("| " + " | ".join(values) + " |")
+    return "\n".join([header, sep] + rows)
 
 
 def main() -> None:
@@ -171,8 +190,7 @@ def main() -> None:
     if sensitivity.empty:
         report.append("No top-variant trades were available for sensitivity analysis.")
     else:
-        table = sensitivity[show_cols].head(20).copy()
-        report.append(table.to_markdown(index=False, floatfmt=".4f"))
+        report.append(_markdown_table(sensitivity.head(20), show_cols))
     report.extend([
         "", "## Reading this stress test", "",
         "- Similar baseline and clean metrics indicate the signal is not being driven by extreme source moves.",
