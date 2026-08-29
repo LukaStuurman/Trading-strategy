@@ -71,7 +71,12 @@ def bootstrap_mean_ci(values, confidence: float = 0.95, samples: int = 400, seed
 
 
 def add_neighbor_robustness(summary: pd.DataFrame) -> pd.DataFrame:
-    """Reward stable parameter plateaus instead of an isolated best cell."""
+    """Build a parameter-selection score without touching the OOS holdout.
+
+    Neighbor stability and the score itself use only train/validation columns.
+    OOS columns may be present in ``summary`` for later reporting, but they are
+    intentionally never read here.
+    """
     if summary.empty:
         return summary.copy()
     out = summary.copy()
@@ -88,24 +93,31 @@ def add_neighbor_robustness(summary: pd.DataFrame) -> pd.DataFrame:
                 mask = pd.Series(True, index=out.index)
                 for other in param_cols:
                     mask &= out[other].eq(value if other == col else row[other])
-                neighbors.extend(out.loc[mask, "oos_avg_return"].dropna().tolist())
+                neighbors.extend(out.loc[mask, "validation_avg_return"].dropna().tolist())
         counts.append(len(neighbors))
         positive.append(float(np.mean(np.asarray(neighbors) > 0)) if neighbors else np.nan)
         medians.append(float(np.median(neighbors)) if neighbors else np.nan)
     out["neighbor_count"] = counts
-    out["neighbor_positive_fraction"] = positive
-    out["neighbor_oos_return_median"] = medians
+    out["neighbor_validation_positive_fraction"] = positive
+    out["neighbor_validation_return_median"] = medians
 
     def pct_rank(col: str) -> pd.Series:
         return pd.to_numeric(out[col], errors="coerce").rank(pct=True).fillna(0.0)
 
-    trade_score = np.minimum(pd.to_numeric(out["oos_trades"], errors="coerce").fillna(0) / 30.0, 1.0)
-    out["robustness_score"] = (
-        0.30 * pct_rank("oos_avg_return")
-        + 0.20 * pct_rank("oos_sharpe")
-        + 0.20 * out["neighbor_positive_fraction"].fillna(0.0)
-        + 0.15 * (pd.to_numeric(out["validation_avg_return"], errors="coerce").fillna(0) > 0).astype(float)
+    trade_score = np.minimum(pd.to_numeric(out["validation_trades"], errors="coerce").fillna(0) / 30.0, 1.0)
+    train_positive = (pd.to_numeric(out["train_avg_return"], errors="coerce").fillna(0) > 0).astype(float)
+    validation_ci_positive = (
+        pd.to_numeric(out.get("validation_ci_low", pd.Series(-1.0, index=out.index)), errors="coerce")
+        .fillna(-1.0)
+        .gt(0)
+        .astype(float)
+    )
+    out["selection_score"] = (
+        0.30 * pct_rank("validation_avg_return")
+        + 0.20 * pct_rank("validation_sharpe")
+        + 0.20 * out["neighbor_validation_positive_fraction"].fillna(0.0)
+        + 0.15 * train_positive
         + 0.10 * trade_score
-        + 0.05 * (pd.to_numeric(out["oos_ci_low"], errors="coerce").fillna(-1) > 0).astype(float)
+        + 0.05 * validation_ci_positive
     )
     return out
