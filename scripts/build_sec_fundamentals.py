@@ -35,7 +35,11 @@ TAGS = {
     "debt_long": ["LongTermDebtAndFinanceLeaseObligationsNoncurrent", "LongTermDebtNoncurrent", "LongTermDebt"],
     "cfo": ["NetCashProvidedByUsedInOperatingActivities"],
     "capex": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsForAdditionsToPropertyPlantAndEquipment"],
-    "shares": ["EntityCommonStockSharesOutstanding"],
+    # SEC staff explicitly distinguishes the DEI cover-page fact from the
+    # US-GAAP balance-sheet fact. Either is a causal outstanding-share count;
+    # prefer the DEI cover fact when present and fall back to the balance-sheet
+    # tag instead of dropping market-cap coverage altogether.
+    "shares": ["EntityCommonStockSharesOutstanding", "CommonStockSharesOutstanding"],
 }
 FLOW_KEYS = {"net_income", "revenue", "operating_income", "cfo", "capex"}
 
