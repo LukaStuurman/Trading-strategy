@@ -26,6 +26,7 @@ def test_finsaber_normalization_uses_adjusted_ohlc_and_preserves_raw_close():
     out = normalize_finsaber_prices(raw, 2024)
     row = out.iloc[0]
     assert row["ticker"] == "BRK.B"
+    assert row["cik"] == "0001067983"
     assert row["raw_close"] == 100.0
     assert row["close"] == 50.0
     assert row["open"] == 49.0
@@ -48,6 +49,27 @@ def test_finsaber_normalization_excludes_impossible_ohlc_and_counts_it():
     out = normalize_finsaber_prices(raw, 2024)
     assert len(out) == 1
     assert out.attrs["normalization_stats"]["invalid_ohlc_rows"] == 1
+
+
+def test_finsaber_normalization_preserves_same_ticker_date_for_distinct_ciks():
+    raw = pd.DataFrame({
+        "date": ["2024-01-02", "2024-01-02", "2024-01-02"],
+        "symbol": ["AAA", "AAA", "AAA"],
+        "cik": [1, 2, 2],
+        "open": [10.0, 20.0, 20.0],
+        "high": [11.0, 21.0, 21.0],
+        "low": [9.0, 19.0, 19.0],
+        "close": [10.0, 20.0, 20.0],
+        "adjusted_close": [10.0, 20.0, 20.0],
+        "volume": [100, 200, 200],
+    })
+    out = normalize_finsaber_prices(raw, 2024)
+    assert len(out) == 2
+    assert set(out["cik"].tolist()) == {"0000000001", "0000000002"}
+    stats = out.attrs["normalization_stats"]
+    assert stats["duplicate_ticker_date_rows"] == 2
+    assert stats["duplicate_instrument_date_rows"] == 1
+    assert stats["conflicting_cik_ticker_date_groups"] == 1
 
 
 def test_table_io_round_trips_parquet(tmp_path):
