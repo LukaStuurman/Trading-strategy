@@ -1,5 +1,7 @@
+import numpy as np
 import pandas as pd
 
+from scripts.build_fundamentals import conservative_available_date
 from src.backtest.portfolio import PortfolioConfig, PortfolioSimulator
 from src.data.universe import attach_membership, historical_components_to_intervals
 from src.data.validation import validate_prices
@@ -20,27 +22,20 @@ def good_fundamentals(ticker="AAA"):
 
 
 def test_historical_snapshots_become_non_overlapping_intervals():
-    history = pd.DataFrame({
-        "date": ["2020-01-01", "2020-01-03"],
-        "tickers": ["AAA,BBB", "AAA,CCC"],
-    })
+    history = pd.DataFrame({"date": ["2020-01-01", "2020-01-03"], "tickers": ["AAA,BBB", "AAA,CCC"]})
     intervals = historical_components_to_intervals(history)
     bbb = intervals[intervals["ticker"] == "BBB"].iloc[0]
     ccc = intervals[intervals["ticker"] == "CCC"].iloc[0]
     assert bbb["end_date"] == pd.Timestamp("2020-01-03")
     assert ccc["start_date"] == pd.Timestamp("2020-01-03")
-
     frame = pd.DataFrame({"ticker": ["BBB", "BBB"], "date": ["2020-01-02", "2020-01-03"]})
-    flagged = attach_membership(frame, intervals)
-    assert flagged["in_universe"].tolist() == [True, False]
+    assert attach_membership(frame, intervals)["in_universe"].tolist() == [True, False]
 
 
 def test_price_validation_rejects_tiny_history():
     prices = pd.DataFrame({
-        "ticker": ["AAA", "AAA"],
-        "date": ["2025-01-01", "2025-01-02"],
-        "open": [10, 10], "high": [11, 11], "low": [9, 9],
-        "close": [10, 10], "volume": [100, 100],
+        "ticker": ["AAA", "AAA"], "date": ["2025-01-01", "2025-01-02"],
+        "open": [10, 10], "high": [11, 11], "low": [9, 9], "close": [10, 10], "volume": [100, 100],
     })
     report = validate_prices(prices, min_rows_per_ticker=100)
     assert not report.ok
@@ -49,39 +44,53 @@ def test_price_validation_rejects_tiny_history():
 
 def test_stabilization_requires_a_completed_confirmation_session():
     prices = pd.DataFrame({
-        "ticker": ["AAA"] * 6,
-        "date": pd.date_range("2025-01-01", periods=6, freq="D"),
-        "open": [100, 82, 81, 83, 84, 85],
-        "high": [101, 83, 83, 84, 85, 86],
-        "low": [99, 79, 80, 82, 83, 84],
-        "close": [100, 80, 82, 83, 84, 85],
-        "volume": [1000] * 6,
+        "ticker": ["AAA"] * 6, "date": pd.date_range("2025-01-01", periods=6, freq="D"),
+        "open": [100, 82, 81, 83, 84, 85], "high": [101, 83, 83, 84, 85, 86],
+        "low": [99, 79, 80, 82, 83, 84], "close": [100, 80, 82, 83, 84, 85], "volume": [1000] * 6,
     })
-    cfg = QualityDipConfig(
-        drop_threshold=-0.10,
-        wait_days=0,
-        hold_days=1,
-        require_stabilization=True,
-        round_trip_cost_bps=0,
-    )
+    cfg = QualityDipConfig(drop_threshold=-0.10, wait_days=0, hold_days=1, require_stabilization=True, round_trip_cost_bps=0)
     trades = generate_trades(prices, good_fundamentals(), cfg)
     assert len(trades) == 1
     assert trades.iloc[0]["entry_date"] == pd.Timestamp("2025-01-04")
     assert trades.iloc[0]["entry_price"] == 83
 
 
+def test_conservative_fallback_waits_for_later_provenance_year():
+    record = {
+        "period_end": "2017-06-30",
+        "prov": {"revenue": {"inputs": [{"accn": "0001564590-18-019062"}]}}
+    }
+    assert conservative_available_date(record) == pd.Timestamp("2018-12-31")
+
+
+def test_fallback_can_use_net_debt_when_gross_debt_and_current_ratio_are_missing():
+    prices = pd.DataFrame({
+        "ticker": ["AAA"] * 5,
+        "date": pd.date_range("2025-01-01", periods=5, freq="D"),
+        "open": [100, 89, 90, 92, 94], "high": [101, 90, 92, 94, 96],
+        "low": [99, 87, 89, 91, 93], "close": [100, 88, 91, 93, 95], "volume": [1000] * 5,
+    })
+    fundamentals = pd.DataFrame({
+        "ticker": ["AAA"], "available_date": ["2024-12-31"],
+        "roe": [0.25], "roic": [0.18], "fcf_margin": [0.12],
+        "debt_to_equity": [np.nan], "net_debt_to_equity": [0.4],
+        "current_ratio": [np.nan], "market_cap": [20_000_000_000],
+        "fundamental_source": ["tenline_sec_annual_conservative"],
+    })
+    trades = generate_trades(prices, fundamentals, QualityDipConfig(drop_threshold=-0.10, wait_days=0, hold_days=1, round_trip_cost_bps=0))
+    assert len(trades) == 1
+    assert trades.iloc[0]["fundamental_source"] == "tenline_sec_annual_conservative"
+
+
 def test_portfolio_enforces_max_concurrent_positions():
     prices = pd.DataFrame({
         "ticker": ["AAA", "BBB", "AAA", "BBB"],
         "date": pd.to_datetime(["2025-01-01", "2025-01-01", "2025-01-02", "2025-01-02"]),
-        "open": [10, 20, 11, 20],
-        "close": [10, 20, 11, 20],
+        "open": [10, 20, 11, 20], "close": [10, 20, 11, 20],
     })
     trades = pd.DataFrame({
-        "ticker": ["AAA", "BBB"],
-        "entry_date": pd.to_datetime(["2025-01-01", "2025-01-01"]),
-        "entry_price": [10.0, 20.0],
-        "exit_date": pd.to_datetime(["2025-01-02", "2025-01-02"]),
+        "ticker": ["AAA", "BBB"], "entry_date": pd.to_datetime(["2025-01-01", "2025-01-01"]),
+        "entry_price": [10.0, 20.0], "exit_date": pd.to_datetime(["2025-01-02", "2025-01-02"]),
         "net_return": [0.10, 0.00],
     })
     simulator = PortfolioSimulator(prices, PortfolioConfig(initial_cash=10_000, max_positions=1, max_position_fraction=0.5))
