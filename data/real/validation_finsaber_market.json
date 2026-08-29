@@ -7,6 +7,8 @@
     "prices": {
       "rows": 4901002,
       "tickers": 1018,
+      "instruments": 1022,
+      "instrument_key": "ticker+cik",
       "start": "2000-01-03",
       "end": "2025-12-31",
       "min_rows_per_ticker": 2,

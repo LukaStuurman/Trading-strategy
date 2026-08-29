@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-08-29T17:35:27.733160+00:00",
+  "created_at_utc": "2026-08-29T19:40:51.560993+00:00",
   "data": {
     "finsaber_source_manifest": {
       "bytes": 9510,
@@ -7,19 +7,19 @@
       "sha256": "6f8602f741e8006c55f46583bdcc856997595af50a5ebb16a2bc86c47b4bd350"
     },
     "fundamentals": {
-      "bytes": 646193,
+      "bytes": 10918267,
       "path": "data/real/fundamentals.csv",
-      "sha256": "eac5c003db1b3599c28c5b6247946480439485b3e57d4c68f4f4815a5ff10032"
+      "sha256": "969a114cfc0da9a6481e6a8381117c6a348978080e55530b0aa2774b6a0c5308"
     },
     "prices": {
-      "bytes": 29703249,
+      "bytes": 105499772,
       "path": "data/real/research_prices.parquet",
-      "sha256": "ae0d4f00dc981c590ee7e2eddd94f36340e2be7052e45002399dad3e6b0aaca6"
+      "sha256": "b31ff7ae5637e15917036b2273e260e4f9faeea382795b57cfbdf327a28dd053"
     },
     "research_coverage": {
-      "bytes": 7350,
+      "bytes": 3487,
       "path": "data/real/research_coverage.json",
-      "sha256": "e839fdfc1ea98f1463174fd804b0021c765a67cad0da2df0132d8b04d1c1de0f"
+      "sha256": "4ce73ba161f0bb0fc7c99bba386c5cb666a7b6844925866726e4408adb05fa53"
     },
     "universe": {
       "bytes": 25711,
@@ -27,11 +27,12 @@
       "sha256": "74eadc642d8f66e2c6c46c760d2a1514f754a3432995857ae2cad293c39c299f"
     }
   },
-  "experiment_id": "4c32970901a4dbeb",
-  "git_commit": "f2f3825a684001a59e442696cc070d9ac8ddae5f",
+  "experiment_id": "2e0b8fd83bd20342",
+  "git_commit": "17afcf41d4bc8526b4777c4bdc9f48d32f246952",
   "metadata": {
     "bulk_price_source": "FINSABER-2 when supplied by the automated pipeline",
     "selection_rule": "robustness score emphasizes OOS return, OOS Sharpe, neighboring parameters, validation sign, trade count and bootstrap CI",
+    "split_source": "fixed_cli_dates",
     "test_start": "2023-05-20",
     "train_end": "2020-10-12",
     "validation_end": "2023-05-19"

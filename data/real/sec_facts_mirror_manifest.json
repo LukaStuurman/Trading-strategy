@@ -1,0 +1,443 @@
+{
+  "source": "deeleeramone/sec-company-facts GitHub release mirror of SEC Company Facts",
+  "upstream_repo": "deeleeramone/sec-company-facts",
+  "release_tag": "parquet-latest",
+  "release_id": 349107102,
+  "published_at": "2026-07-05T06:48:16Z",
+  "availability_field": "filed",
+  "sharding_rule": "CIK modulo 64",
+  "input_ciks": 989,
+  "matched_ciks": 881,
+  "cik_coverage": 0.890798786653185,
+  "buckets": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63
+  ],
+  "rows": 1962370,
+  "tags": [
+    "Assets",
+    "AssetsCurrent",
+    "CashAndCashEquivalentsAtCarryingValue",
+    "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+    "EntityCommonStockSharesOutstanding",
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+    "IncomeTaxExpenseBenefit",
+    "Liabilities",
+    "LiabilitiesCurrent",
+    "LongTermDebt",
+    "LongTermDebtCurrent",
+    "LongTermDebtNoncurrent",
+    "NetCashProvidedByUsedInOperatingActivities",
+    "NetIncomeLoss",
+    "OperatingIncomeLoss",
+    "PaymentsToAcquirePropertyPlantAndEquipment",
+    "ProfitLoss",
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "Revenues",
+    "SalesRevenueNet",
+    "ShortTermBorrowings",
+    "StockholdersEquity",
+    "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"
+  ],
+  "support_assets": {
+    "xbrl_tags.parquet": {
+      "size": 598779,
+      "digest": "sha256:3a1c48a7dbbb917b33e724b599ce118bbfa99cb595b015e7215a0f53a38ab4c4"
+    },
+    "accessions.parquet": {
+      "size": 2748560,
+      "digest": "sha256:a9f5a9191df84436e95020142c4273d703e7feebdb5bdde0dd08cbc290325ca4"
+    }
+  },
+  "fact_assets": [
+    {
+      "name": "facts_enc-b00000.parquet",
+      "size": 10043578,
+      "digest": "sha256:dc902054ec4aea2f54796e59be2a77f9c6760b27cad33abbffc84605d65a28d3"
+    },
+    {
+      "name": "facts_enc-b00001.parquet",
+      "size": 7948466,
+      "digest": "sha256:cd0b39e81ecab871adbff2f23aa099f885f5865c6561c5697d658e231d58dfe1"
+    },
+    {
+      "name": "facts_enc-b00002.parquet",
+      "size": 9027027,
+      "digest": "sha256:6b33aa2909864828545ecfbd6433eb02cf47bc57bfa7c9aab5a2b752de34ef85"
+    },
+    {
+      "name": "facts_enc-b00003.parquet",
+      "size": 10061977,
+      "digest": "sha256:0c2aa498e48d9d196a4cdd23e2c46fde2f1e19de3c245c372b45337feb0ed306"
+    },
+    {
+      "name": "facts_enc-b00004.parquet",
+      "size": 9280504,
+      "digest": "sha256:edca2747a0fba762a8a2fea89465c0bb89c559bbc60d0d6028efdce4b11853ac"
+    },
+    {
+      "name": "facts_enc-b00005.parquet",
+      "size": 7978620,
+      "digest": "sha256:bddc689ed2943ac50fe19983e1654f742a30c6d554cceb69110dc31c112341fa"
+    },
+    {
+      "name": "facts_enc-b00006.parquet",
+      "size": 10811124,
+      "digest": "sha256:6cf7f504df4e8dd5ef23be8a607b60c7facf88d51e6b66f0fa2c74e9c3eddee9"
+    },
+    {
+      "name": "facts_enc-b00007.parquet",
+      "size": 9890832,
+      "digest": "sha256:f231be1137a632d5cae567bc7deadef7200213fab7ee81316bee9be252e4610d"
+    },
+    {
+      "name": "facts_enc-b00008.parquet",
+      "size": 8658969,
+      "digest": "sha256:ab6c2ab6324defd37c306bd967e5970c150593d193c2098e26b1dcb180868554"
+    },
+    {
+      "name": "facts_enc-b00009.parquet",
+      "size": 9460983,
+      "digest": "sha256:694fefb4cfc8a5182410214e2860afda3dff26da8969ea57543706538c6ed7fd"
+    },
+    {
+      "name": "facts_enc-b00010.parquet",
+      "size": 9394436,
+      "digest": "sha256:9926a1052eafa18cf4f74018b95ad7d82ed6237924ef7b413e584d2b0c51e5e0"
+    },
+    {
+      "name": "facts_enc-b00011.parquet",
+      "size": 9066086,
+      "digest": "sha256:9d6e212c7d815fd2882658961c32dc881295ae8daaf2e95d7419265f1026a8bb"
+    },
+    {
+      "name": "facts_enc-b00012.parquet",
+      "size": 10799931,
+      "digest": "sha256:779817fcff3146b75163680a4d60a2c9856b00bcaf20a91f485bf2bb13fbd2b2"
+    },
+    {
+      "name": "facts_enc-b00013.parquet",
+      "size": 8319292,
+      "digest": "sha256:c0ee915ee6f0fe20f1c0e2fbf8cf62bfa529a7c936fd56abc248ee7c9d8006b9"
+    },
+    {
+      "name": "facts_enc-b00014.parquet",
+      "size": 8764684,
+      "digest": "sha256:640e00b031e6f8c92b466934c95691467602b37b4617af5f9573793044e2a166"
+    },
+    {
+      "name": "facts_enc-b00015.parquet",
+      "size": 9521295,
+      "digest": "sha256:936c58ed33907f23945a34dd34aa37d4188769ada41755a1fa88fdcfe7b2a395"
+    },
+    {
+      "name": "facts_enc-b00016.parquet",
+      "size": 9819308,
+      "digest": "sha256:f1b39a786ab87788eaeebc556de3bb4569a45cfdff73d691ba247e9b3ed03110"
+    },
+    {
+      "name": "facts_enc-b00017.parquet",
+      "size": 9146979,
+      "digest": "sha256:2168cf76e5b8addfc5384b374549c5d364846dfe0c8907d2a180e2d026c5095e"
+    },
+    {
+      "name": "facts_enc-b00018.parquet",
+      "size": 8699399,
+      "digest": "sha256:4b801aa5c5eb29a96adc8f52b5e313202d9484e70a09bc273e05a20a59b17af5"
+    },
+    {
+      "name": "facts_enc-b00019.parquet",
+      "size": 10913536,
+      "digest": "sha256:9c91b17c18dffe0be584783ac10958e615a2362d870942d68bad8fe95cea55c3"
+    },
+    {
+      "name": "facts_enc-b00020.parquet",
+      "size": 11602306,
+      "digest": "sha256:1b0b608caa56137d1b8529f934a4e1896792256506a627c7813bfc32570f640e"
+    },
+    {
+      "name": "facts_enc-b00021.parquet",
+      "size": 10878504,
+      "digest": "sha256:82a9dd74b8cc08a7f574945db5040efaec58d1a89b156a58d326b1e57fc166fd"
+    },
+    {
+      "name": "facts_enc-b00022.parquet",
+      "size": 10195544,
+      "digest": "sha256:3e1b8f1b108deb107e139285d5409137ddda7bd25fcfc239792809b2d8ac58d5"
+    },
+    {
+      "name": "facts_enc-b00023.parquet",
+      "size": 10407936,
+      "digest": "sha256:09f515ae832d59be9c7d38f26e05f1481120c72881a1e5728a0b52aaa6a407e8"
+    },
+    {
+      "name": "facts_enc-b00024.parquet",
+      "size": 9520590,
+      "digest": "sha256:6c2acd91af0b8f6588c14cbf64d33d8be02f1168614be435661f6b2e3bf8c36b"
+    },
+    {
+      "name": "facts_enc-b00025.parquet",
+      "size": 10613350,
+      "digest": "sha256:9ea3c5c183163142916278dc4b159b6884946f14078d09e829efb8badeef0f36"
+    },
+    {
+      "name": "facts_enc-b00026.parquet",
+      "size": 9743337,
+      "digest": "sha256:36b1c807b04fc9e558f5418f657f1026f4bcea1621d3e94ed495c2365607a61b"
+    },
+    {
+      "name": "facts_enc-b00027.parquet",
+      "size": 9547849,
+      "digest": "sha256:4a6021a5041c1e8497c4d6e890b5bdb67ee92d5445cc221e6cb8b8bf0d71c39e"
+    },
+    {
+      "name": "facts_enc-b00028.parquet",
+      "size": 10437747,
+      "digest": "sha256:b8701d0de1464632d211aaf5c198d8aceb7fa4732828d6bd1f02a4ba80132bb3"
+    },
+    {
+      "name": "facts_enc-b00029.parquet",
+      "size": 8675322,
+      "digest": "sha256:2bbc45b42adda10df9eefe75e41a10330f25b9f1399a24708f1eeffd3b504ad9"
+    },
+    {
+      "name": "facts_enc-b00030.parquet",
+      "size": 8273851,
+      "digest": "sha256:e4fe34a2b7848f68038fe13de99b5021b2f983fc4f4e00687f619819c3e65539"
+    },
+    {
+      "name": "facts_enc-b00031.parquet",
+      "size": 9131925,
+      "digest": "sha256:d010a43d2e13c1af2bfa402817e3b8d9be78985a8f1ac1d88b8f21b31de916cd"
+    },
+    {
+      "name": "facts_enc-b00032.parquet",
+      "size": 10593032,
+      "digest": "sha256:af5581e62fde543ede0bcfffa2c7bcab92b0c1f88595ed30d2ba819e583a78a0"
+    },
+    {
+      "name": "facts_enc-b00033.parquet",
+      "size": 10247028,
+      "digest": "sha256:198fd491541436a2c339033d51246435f8323e81d3ea7b66b51ed39b77565393"
+    },
+    {
+      "name": "facts_enc-b00034.parquet",
+      "size": 9193144,
+      "digest": "sha256:2d1ef0cf1a099914a9785be39b94569301a5cbac0c5524ba9244aafbccb29d63"
+    },
+    {
+      "name": "facts_enc-b00035.parquet",
+      "size": 8344155,
+      "digest": "sha256:851c1ebfa3abb2333269e86e6d23a46486896e2d8a550ef828ed82e720fe7220"
+    },
+    {
+      "name": "facts_enc-b00036.parquet",
+      "size": 10698919,
+      "digest": "sha256:77d412703b4061015253583794f90e444389a3e25c99c548ca5f867edc3900c3"
+    },
+    {
+      "name": "facts_enc-b00037.parquet",
+      "size": 9765897,
+      "digest": "sha256:d62a315b8c5e113fead0357d2cf3ba468d5d539139fd823ac2fa5489389c716c"
+    },
+    {
+      "name": "facts_enc-b00038.parquet",
+      "size": 9265341,
+      "digest": "sha256:b2ba1adde7dda2c6ab959dc7800d05d99a22268f7af1ecc593ce48bb2015b99f"
+    },
+    {
+      "name": "facts_enc-b00039.parquet",
+      "size": 8695327,
+      "digest": "sha256:26236e83e593a683e6eab78a7d12ffe6b599c2de02b46555eecdbc6bf79bdb22"
+    },
+    {
+      "name": "facts_enc-b00040.parquet",
+      "size": 8282732,
+      "digest": "sha256:00b6a21878499bb807d79afbdf7cfb556422121607bfd87694cac66ce6813810"
+    },
+    {
+      "name": "facts_enc-b00041.parquet",
+      "size": 10645193,
+      "digest": "sha256:9f6afa0afb401cb01c41fb325c2c41824d10d1909bb4c701393d137fe3b3974d"
+    },
+    {
+      "name": "facts_enc-b00042.parquet",
+      "size": 9961186,
+      "digest": "sha256:045e3d5a8a044ecffa3511d9486af2ea90f92fc1992d4b81f330f5f7e20d4584"
+    },
+    {
+      "name": "facts_enc-b00043.parquet",
+      "size": 8821339,
+      "digest": "sha256:86706f34d8992cf18c1c0850e3b3e2d7837a9348ec9b30fd5b6f1a984cdf51bb"
+    },
+    {
+      "name": "facts_enc-b00044.parquet",
+      "size": 10323402,
+      "digest": "sha256:41c435eec3e5e2d58e5b923766a242be35ba8be12098f906d530dfdc2ec2e11f"
+    },
+    {
+      "name": "facts_enc-b00045.parquet",
+      "size": 10931453,
+      "digest": "sha256:50fc981be7cd8f9f94dac3d645eb2855e10f7a41b4b2c073c0fb2b8e1f45dd4a"
+    },
+    {
+      "name": "facts_enc-b00046.parquet",
+      "size": 10719652,
+      "digest": "sha256:e44ef42186f156a6c6ae4d510026ade575d33567e39127bce9a307af14581273"
+    },
+    {
+      "name": "facts_enc-b00047.parquet",
+      "size": 10174178,
+      "digest": "sha256:961d4f141ec00ec13bea0b0ead533cb1cf55eb51bf3ff2a425b39fd5376b6f21"
+    },
+    {
+      "name": "facts_enc-b00048.parquet",
+      "size": 10316565,
+      "digest": "sha256:9d30fb906e075e66b8f6fb22e561ce64bae03e0cc285065c4e1afb8b0305b801"
+    },
+    {
+      "name": "facts_enc-b00049.parquet",
+      "size": 9340239,
+      "digest": "sha256:633651aabdeacc5f5a67cf6ded1710448922dd760e37e8279dde2456b834d7fa"
+    },
+    {
+      "name": "facts_enc-b00050.parquet",
+      "size": 8904599,
+      "digest": "sha256:a9162ab10016a51063f0a44006b5cf2d47293278d92502f4298d7eda166c9e05"
+    },
+    {
+      "name": "facts_enc-b00051.parquet",
+      "size": 10072089,
+      "digest": "sha256:aeb701ca0433e8638a7ee250dbb3ba4d9f7a31a86ca3f76f120ef3081da05d64"
+    },
+    {
+      "name": "facts_enc-b00052.parquet",
+      "size": 8848234,
+      "digest": "sha256:93eb34d5c4841242068ac1cff3d5d1e2c97e9c693bf46b45000f15bb3ce95993"
+    },
+    {
+      "name": "facts_enc-b00053.parquet",
+      "size": 11379468,
+      "digest": "sha256:d05d553a3671c0398c59dda3dfa2dbc3fcc1255cba35cb0f47e6eb57d95e46af"
+    },
+    {
+      "name": "facts_enc-b00054.parquet",
+      "size": 10637478,
+      "digest": "sha256:561ba1278dbce1c2481e15b7c7fdca67e8d61f75714005a85365130bb8f15374"
+    },
+    {
+      "name": "facts_enc-b00055.parquet",
+      "size": 8072296,
+      "digest": "sha256:9a0b33535567f63fb1a917bc3664fe31c7f0f1c6c8f49ea4c952df08d879a949"
+    },
+    {
+      "name": "facts_enc-b00056.parquet",
+      "size": 11146377,
+      "digest": "sha256:5900c6a57fbbe2aeb0c00b44e74eef4cf7a4b09b20119e5109a3b98354ed52df"
+    },
+    {
+      "name": "facts_enc-b00057.parquet",
+      "size": 10588275,
+      "digest": "sha256:e43ef1668966777610f551556d6f0726354a3eac7b55310bb4fc787425251465"
+    },
+    {
+      "name": "facts_enc-b00058.parquet",
+      "size": 8558227,
+      "digest": "sha256:bfa399c32590e699fc963ef8b275cd5b12f2fa99002316d7282396f43f6a87a4"
+    },
+    {
+      "name": "facts_enc-b00059.parquet",
+      "size": 11039831,
+      "digest": "sha256:c359cc513e7c6bdffe8efa13c484f249adaedeb6474ca987f9967fdbde597cae"
+    },
+    {
+      "name": "facts_enc-b00060.parquet",
+      "size": 9921294,
+      "digest": "sha256:0a4390d0106ac8ed0730c89baaa709c5758306ddee6eb754adffc4eb65554f93"
+    },
+    {
+      "name": "facts_enc-b00061.parquet",
+      "size": 12677801,
+      "digest": "sha256:241a68c67d74cea4de34537c0096784d49dab55b063f2283e291c59e1bf480ee"
+    },
+    {
+      "name": "facts_enc-b00062.parquet",
+      "size": 9898603,
+      "digest": "sha256:1e9430e4cf651ffe6e4a59a1d2ff2b15184d16768dc5cf0d280fc2483f180f6a"
+    },
+    {
+      "name": "facts_enc-b00063.parquet",
+      "size": 9081072,
+      "digest": "sha256:dc2c2f09556e9ee12a05f9b17e6a2ad6e37c9abcf978b2c5332509b80261b34b"
+    }
+  ],
+  "compact_output_sha256": "d6e6a86f86b0b2bd53423a8967d74b48a9cdd27ae2c21576dfb9154cb0b48bec",
+  "notes": [
+    "Only facts filed on or before a simulated date may be used.",
+    "Only FINSABER CIKs and quality-model tags are retained.",
+    "Upstream shard files remain cache-only and are not committed."
+  ]
+}

@@ -1,26 +1,32 @@
 {
   "errors": [],
   "warnings": [
-    "fundamentals: debt_to_equity coverage is only 0.0%",
-    "fundamentals: current_ratio coverage is only 0.0%"
+    "prices: 68 close-to-close moves exceed 300%; inspect split/source handling",
+    "fundamentals: market_cap coverage is only 7.6%"
   ],
   "stats": {
     "prices": {
-      "rows": 769637,
-      "tickers": 475,
-      "start": "2012-12-21",
+      "rows": 2668182,
+      "tickers": 820,
+      "instruments": 823,
+      "instrument_key": "ticker+cik",
+      "start": "2009-04-21",
       "end": "2025-12-31",
       "min_rows_per_ticker": 100,
-      "close_moves_over_300pct": 0
+      "close_moves_over_300pct": 68
     },
     "fundamentals": {
-      "rows": 3432,
-      "tickers": 490,
-      "roe_coverage": 0.9991258741258742,
-      "fcf_margin_coverage": 0.9055944055944056,
-      "debt_to_equity_coverage": 0.0,
-      "current_ratio_coverage": 0.0,
-      "market_cap_coverage": 0.9571678321678322
+      "rows": 43492,
+      "tickers": 873,
+      "instruments": 877,
+      "instrument_key": "ticker+cik",
+      "availability_lag_days_min": 1,
+      "availability_lag_days_median": 1.0,
+      "roe_coverage": 0.9390002759128115,
+      "fcf_margin_coverage": 0.660558263588706,
+      "debt_to_equity_coverage": 0.8435574358502713,
+      "current_ratio_coverage": 0.8432815230387197,
+      "market_cap_coverage": 0.07564609583371655
     },
     "universe": {
       "rows": 1172,
