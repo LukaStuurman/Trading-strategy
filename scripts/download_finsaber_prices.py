@@ -40,6 +40,19 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def normalize_cik(value) -> str:
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "<na>"}:
+        return ""
+    try:
+        return str(int(float(text))).zfill(10)
+    except (TypeError, ValueError):
+        digits = "".join(ch for ch in text if ch.isdigit())
+        return str(int(digits)).zfill(10) if digits else ""
+
+
 def normalize_finsaber_prices(frame: pd.DataFrame, year: int) -> pd.DataFrame:
     required = {
         "date", "symbol", "cik", "open", "high", "low", "close",
@@ -52,7 +65,7 @@ def normalize_finsaber_prices(frame: pd.DataFrame, year: int) -> pd.DataFrame:
     x = frame[list(required)].copy()
     x["date"] = pd.to_datetime(x["date"], errors="coerce")
     x["ticker"] = x["symbol"].map(normalize_ticker)
-    x["cik"] = x["cik"].astype("string").fillna("")
+    x["cik"] = x["cik"].map(normalize_cik).astype("string")
     for col in ["open", "high", "low", "close", "adjusted_close", "volume"]:
         x[col] = pd.to_numeric(x[col], errors="coerce")
 
@@ -98,14 +111,20 @@ def normalize_finsaber_prices(frame: pd.DataFrame, year: int) -> pd.DataFrame:
     out = out.loc[ohlc_valid].copy()
 
     before_dupes = len(out)
-    out = out.drop_duplicates(["ticker", "date"], keep="last")
-    duplicate_rows = int(before_dupes - len(out))
-    out = out.sort_values(["ticker", "date"]).reset_index(drop=True)
+    ticker_date_unique = len(out.drop_duplicates(["ticker", "date"], keep="last"))
+    ticker_date_duplicate_rows = int(before_dupes - ticker_date_unique)
+    cik_counts = out.groupby(["ticker", "date"], observed=True)["cik"].nunique(dropna=False)
+    conflicting_cik_ticker_date_groups = int((cik_counts > 1).sum())
+    out = out.drop_duplicates(["ticker", "cik", "date"], keep="last")
+    instrument_date_duplicate_rows = int(before_dupes - len(out))
+    out = out.sort_values(["ticker", "cik", "date"]).reset_index(drop=True)
     out.attrs["normalization_stats"] = {
         "input_rows": int(len(frame)),
         "invalid_base_rows": invalid_base,
         "invalid_ohlc_rows": invalid_ohlc,
-        "duplicate_ticker_date_rows": duplicate_rows,
+        "duplicate_ticker_date_rows": ticker_date_duplicate_rows,
+        "duplicate_instrument_date_rows": instrument_date_duplicate_rows,
+        "conflicting_cik_ticker_date_groups": conflicting_cik_ticker_date_groups,
         "output_rows": int(len(out)),
     }
     return out
@@ -150,6 +169,8 @@ def main() -> None:
     yearly_normalization: dict[str, dict] = {}
     source_files: list[dict] = []
     total_invalid_ohlc = 0
+    total_instrument_duplicates = 0
+    total_conflicting_cik_groups = 0
 
     try:
         for year in range(args.start_year, args.end_year + 1):
@@ -166,6 +187,8 @@ def main() -> None:
             stats = dict(normalized.attrs.get("normalization_stats", {}))
             yearly_normalization[str(year)] = stats
             total_invalid_ohlc += int(stats.get("invalid_ohlc_rows", 0))
+            total_instrument_duplicates += int(stats.get("duplicate_instrument_date_rows", 0))
+            total_conflicting_cik_groups += int(stats.get("conflicting_cik_ticker_date_groups", 0))
             if normalized.empty:
                 raise RuntimeError(f"FINSABER partition {year} produced zero valid price rows")
             table = pa.Table.from_pandas(normalized, preserve_index=False)
@@ -207,6 +230,8 @@ def main() -> None:
         "yearly_normalization": yearly_normalization,
         "normalization_totals": {
             "invalid_ohlc_rows_excluded": total_invalid_ohlc,
+            "duplicate_instrument_date_rows_excluded": total_instrument_duplicates,
+            "conflicting_cik_ticker_date_groups_preserved": total_conflicting_cik_groups,
             "max_invalid_ohlc_rows": args.max_invalid_ohlc_rows,
         },
         "source_files": source_files,
@@ -220,6 +245,7 @@ def main() -> None:
             "open_high_low_close": "split/dividend-adjusted with one adjusted_close/raw_close factor applied consistently to raw O/H/L/C",
             "raw_close": "upstream unadjusted close retained for as-reported share-count market-cap calculations",
             "volume": "upstream raw volume",
+            "identity": "rows are deduplicated by ticker+CIK+date; same-symbol different-CIK rows are preserved",
             "invalid_ohlc": "excluded from research and counted in yearly_normalization; run fails if exclusion ceiling is exceeded",
         },
         "research_note": "Historical S&P membership is applied separately; presence in FINSABER alone is not treated as index membership.",
@@ -227,6 +253,7 @@ def main() -> None:
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"[finsaber] wrote {row_count:,} rows / {len(tickers)} tickers to {output}")
     print(f"[finsaber] excluded {total_invalid_ohlc:,} invalid OHLC rows")
+    print(f"[finsaber] preserved {total_conflicting_cik_groups:,} ticker/date groups containing multiple CIKs")
     print(f"[finsaber] pinned upstream revision {revision}")
 
 
