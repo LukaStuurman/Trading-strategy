@@ -6,9 +6,9 @@ revision, stream each yearly file through a ParquetWriter, retain raw close for
 market-cap calculations, and use split/dividend-adjusted OHLC for return and
 execution research.
 
-Rows with impossible OHLC geometry are excluded and counted in the manifest.
-A configurable hard ceiling prevents broad source-cleaning from silently hiding
-a material upstream data-quality problem.
+Rows with impossible OHLC geometry or dates outside their declared partition
+are excluded and counted in the manifest. Configurable hard gates prevent broad
+source-cleaning from silently hiding a material upstream data-quality problem.
 """
 from __future__ import annotations
 
@@ -64,6 +64,9 @@ def normalize_finsaber_prices(frame: pd.DataFrame, year: int) -> pd.DataFrame:
 
     x = frame[list(required)].copy()
     x["date"] = pd.to_datetime(x["date"], errors="coerce")
+    invalid_date_rows = int(x["date"].isna().sum())
+    out_of_partition_year_rows = int((x["date"].notna() & x["date"].dt.year.ne(year)).sum())
+    partition_valid = x["date"].notna() & x["date"].dt.year.eq(year)
     x["ticker"] = x["symbol"].map(normalize_ticker)
     x["cik"] = x["cik"].map(normalize_cik).astype("string")
     for col in ["open", "high", "low", "close", "adjusted_close", "volume"]:
@@ -72,7 +75,7 @@ def normalize_finsaber_prices(frame: pd.DataFrame, year: int) -> pd.DataFrame:
     raw_close = x["close"].copy()
     factor = x["adjusted_close"] / raw_close
     base_valid = (
-        x["date"].notna()
+        partition_valid
         & x["ticker"].ne("")
         & raw_close.gt(0)
         & x["adjusted_close"].gt(0)
@@ -120,6 +123,8 @@ def normalize_finsaber_prices(frame: pd.DataFrame, year: int) -> pd.DataFrame:
     out = out.sort_values(["ticker", "cik", "date"]).reset_index(drop=True)
     out.attrs["normalization_stats"] = {
         "input_rows": int(len(frame)),
+        "invalid_date_rows": invalid_date_rows,
+        "out_of_partition_year_rows": out_of_partition_year_rows,
         "invalid_base_rows": invalid_base,
         "invalid_ohlc_rows": invalid_ohlc,
         "duplicate_ticker_date_rows": ticker_date_duplicate_rows,
@@ -149,6 +154,7 @@ def main() -> None:
     p.add_argument("--min-rows", type=int, default=0)
     p.add_argument("--min-tickers", type=int, default=0)
     p.add_argument("--max-invalid-ohlc-rows", type=int, default=1000)
+    p.add_argument("--max-out-of-partition-rows", type=int, default=100000)
     args = p.parse_args()
 
     if args.end_year < args.start_year:
@@ -169,6 +175,7 @@ def main() -> None:
     yearly_normalization: dict[str, dict] = {}
     source_files: list[dict] = []
     total_invalid_ohlc = 0
+    total_out_of_partition = 0
     total_instrument_duplicates = 0
     total_conflicting_cik_groups = 0
 
@@ -187,6 +194,7 @@ def main() -> None:
             stats = dict(normalized.attrs.get("normalization_stats", {}))
             yearly_normalization[str(year)] = stats
             total_invalid_ohlc += int(stats.get("invalid_ohlc_rows", 0))
+            total_out_of_partition += int(stats.get("out_of_partition_year_rows", 0))
             total_instrument_duplicates += int(stats.get("duplicate_instrument_date_rows", 0))
             total_conflicting_cik_groups += int(stats.get("conflicting_cik_ticker_date_groups", 0))
             if normalized.empty:
@@ -201,7 +209,10 @@ def main() -> None:
             tickers.update(normalized["ticker"].astype(str).unique().tolist())
             source_files.append({"year": year, "filename": filename, "bytes": local.stat().st_size})
             dropped = int(stats.get("input_rows", count) - count)
-            print(f"[finsaber] {year}: {count:,} normalized rows ({dropped:,} excluded)")
+            print(
+                f"[finsaber] {year}: {count:,} normalized rows ({dropped:,} excluded; "
+                f"{int(stats.get('out_of_partition_year_rows', 0)):,} outside partition year)"
+            )
     finally:
         if writer is not None:
             writer.close()
@@ -217,6 +228,11 @@ def main() -> None:
             f"FINSABER OHLC quality gate failed: {total_invalid_ohlc:,} invalid rows > "
             f"allowed {args.max_invalid_ohlc_rows:,}"
         )
+    if total_out_of_partition > args.max_out_of_partition_rows:
+        raise RuntimeError(
+            f"FINSABER partition quality gate failed: {total_out_of_partition:,} rows outside declared year > "
+            f"allowed {args.max_out_of_partition_rows:,}"
+        )
 
     manifest = {
         "source": "FINSABER-2 official Hugging Face dataset",
@@ -230,9 +246,11 @@ def main() -> None:
         "yearly_normalization": yearly_normalization,
         "normalization_totals": {
             "invalid_ohlc_rows_excluded": total_invalid_ohlc,
+            "out_of_partition_year_rows_excluded": total_out_of_partition,
             "duplicate_instrument_date_rows_excluded": total_instrument_duplicates,
             "conflicting_cik_ticker_date_groups_preserved": total_conflicting_cik_groups,
             "max_invalid_ohlc_rows": args.max_invalid_ohlc_rows,
+            "max_out_of_partition_rows": args.max_out_of_partition_rows,
         },
         "source_files": source_files,
         "normalized_output": {
@@ -245,6 +263,7 @@ def main() -> None:
             "open_high_low_close": "split/dividend-adjusted with one adjusted_close/raw_close factor applied consistently to raw O/H/L/C",
             "raw_close": "upstream unadjusted close retained for as-reported share-count market-cap calculations",
             "volume": "upstream raw volume",
+            "partitioning": "only rows whose trading-date year matches price_daily/year=YYYY are retained",
             "identity": "rows are deduplicated by ticker+CIK+date; same-symbol different-CIK rows are preserved",
             "invalid_ohlc": "excluded from research and counted in yearly_normalization; run fails if exclusion ceiling is exceeded",
         },
@@ -253,6 +272,7 @@ def main() -> None:
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"[finsaber] wrote {row_count:,} rows / {len(tickers)} tickers to {output}")
     print(f"[finsaber] excluded {total_invalid_ohlc:,} invalid OHLC rows")
+    print(f"[finsaber] excluded {total_out_of_partition:,} rows outside their declared year partition")
     print(f"[finsaber] preserved {total_conflicting_cik_groups:,} ticker/date groups containing multiple CIKs")
     print(f"[finsaber] pinned upstream revision {revision}")
 
