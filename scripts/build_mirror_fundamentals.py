@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Build point-in-time quality fundamentals from compact SEC mirror facts.
 
-The builder uses raw Company Facts rows and their SEC `filed` timestamps.  The
-implementation keeps one incremental context state per metric and evaluates it
-only when that metric changes.  This preserves point-in-time semantics while
-avoiding repeated DataFrame filtering for every metric x filing-date pair.
+The builder uses raw Company Facts rows and their SEC `filed` timestamps. Because
+Company Facts exposes a filing date but not a trustworthy publication time for
+our daily backtest, each snapshot becomes usable one calendar day after `filed`.
+That conservative guard prevents an after-close filing from leaking into the
+same day's signal. The implementation keeps one incremental context state per
+metric so the broad historical build remains fast.
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ MIRROR_TAGS = {
     "income_tax": ["IncomeTaxExpenseBenefit"],
 }
 MIRROR_FLOW_KEYS = set(FLOW_KEYS) | {"pretax_income", "income_tax"}
+AVAILABILITY_LAG = pd.Timedelta(days=1)
 
 
 def normalize_cik(value) -> str | None:
@@ -57,8 +60,6 @@ def _metric_frame(facts: pd.DataFrame, candidates: list[str], flow: bool) -> pd.
         x[col] = pd.to_datetime(x.get(col), errors="coerce")
     x["val"] = pd.to_numeric(x["val"], errors="coerce")
     x = x.dropna(subset=["filed", "end", "val"])
-    # A fact should not describe a period materially after it was filed. Seven
-    # days permits benign timestamp/calendar differences without future leakage.
     x = x[x["end"] <= x["filed"] + pd.Timedelta(days=7)]
     if flow:
         x = x.dropna(subset=["start"])
@@ -67,21 +68,16 @@ def _metric_frame(facts: pd.DataFrame, candidates: list[str], flow: bool) -> pd.
         context_cols = ["filed", "start", "end"]
     else:
         context_cols = ["filed", "end"]
-    # Select the preferred taxonomy tag per identical filing context, but allow
-    # a later filing to restate that same context.
     x = x.sort_values(context_cols + ["priority"]).drop_duplicates(context_cols, keep="first")
     return x.sort_values(["filed", "end", "priority"]).reset_index(drop=True)
 
 
 def _flow_snapshot(state: dict[tuple[pd.Timestamp, pd.Timestamp], tuple[int, int, float]], date: pd.Timestamp) -> float:
-    """Return TTM flow from the current set of filed contexts."""
     if not state:
         return np.nan
-
     quarters: dict[pd.Timestamp, tuple[int, float]] = {}
     by_start: dict[pd.Timestamp, list[tuple[pd.Timestamp, int, int, float]]] = {}
     annual: list[tuple[pd.Timestamp, int, float]] = []
-
     for (start, end), (duration, priority, value) in state.items():
         if 65 <= duration <= 115:
             cur = quarters.get(end)
@@ -91,10 +87,6 @@ def _flow_snapshot(state: dict[tuple[pd.Timestamp, pd.Timestamp], tuple[int, int
             by_start.setdefault(start, []).append((end, duration, priority, value))
         if 300 <= duration <= 400:
             annual.append((end, priority, value))
-
-    # SEC cash-flow and income facts are frequently YTD. Consecutive contexts
-    # with the same start date can be differenced into standalone quarters,
-    # including Q4 = FY - Q3 YTD.
     for group in by_start.values():
         group.sort(key=lambda row: (row[1], row[2], row[0]))
         by_duration: dict[int, tuple[pd.Timestamp, int, int, float]] = {}
@@ -111,13 +103,11 @@ def _flow_snapshot(state: dict[tuple[pd.Timestamp, pd.Timestamp], tuple[int, int
                 derived = curr[3] - prev[3]
                 if np.isfinite(derived) and end not in quarters:
                     quarters[end] = (10_000 + curr[2], float(derived))
-
     quarter_rows = [(end, value[1]) for end, value in sorted(quarters.items()) if np.isfinite(value[1])]
     if len(quarter_rows) >= 4:
         last4 = quarter_rows[-4:]
         if (last4[-1][0] - last4[0][0]).days <= 380:
             return float(sum(v for _, v in last4))
-
     if not annual:
         return np.nan
     annual.sort(key=lambda row: (row[0], -row[1]))
@@ -135,14 +125,14 @@ def _flow_series(frame: pd.DataFrame) -> pd.Series:
     for filed, group in frame.groupby("filed", sort=True):
         filed = pd.Timestamp(filed)
         for row in group.itertuples(index=False):
-            key = (pd.Timestamp(row.start), pd.Timestamp(row.end))
-            state[key] = (int(row.duration), int(row.priority), float(row.val))
+            state[(pd.Timestamp(row.start), pd.Timestamp(row.end))] = (
+                int(row.duration), int(row.priority), float(row.val)
+            )
         out[filed] = _flow_snapshot(state, filed)
     return pd.Series(out, dtype=float).sort_index()
 
 
 def _instant_series(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
-    """Return latest and average-balance series at each filing event."""
     if frame.empty:
         empty = pd.Series(dtype=float)
         return empty, empty
@@ -153,10 +143,9 @@ def _instant_series(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
         filed = pd.Timestamp(filed)
         for row in group.itertuples(index=False):
             end = pd.Timestamp(row.end)
-            # _metric_frame already chose the preferred tag within this filing.
-            # A later filing must replace an older context even when the issuer
-            # changed to a lower-priority taxonomy tag; otherwise restatements or
-            # taxonomy migrations could freeze stale balances indefinitely.
+            # Preference was resolved within this filing by _metric_frame. A
+            # later filing always replaces the older context, even after a tag
+            # migration or restatement.
             state[end] = (int(row.priority), float(row.val))
         if not state:
             continue
@@ -169,10 +158,7 @@ def _instant_series(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
             average_out[filed] = float(np.nanmean([prior_val, latest_val]))
         else:
             average_out[filed] = latest_val
-    return (
-        pd.Series(latest_out, dtype=float).sort_index(),
-        pd.Series(average_out, dtype=float).sort_index(),
-    )
+    return pd.Series(latest_out, dtype=float).sort_index(), pd.Series(average_out, dtype=float).sort_index()
 
 
 def _asof_series(series: pd.Series, dates: pd.DatetimeIndex) -> pd.Series:
@@ -195,14 +181,10 @@ def _price_series_asof(pg: pd.DataFrame, dates: pd.DatetimeIndex) -> pd.Series:
     price_col = "raw_close" if "raw_close" in pg.columns else "close"
     right = pg[["date", price_col]].copy().sort_values("date")
     right[price_col] = pd.to_numeric(right[price_col], errors="coerce")
-    left = pd.DataFrame({"available_date": dates})
+    left = pd.DataFrame({"filed_date": dates})
     merged = pd.merge_asof(
-        left,
-        right,
-        left_on="available_date",
-        right_on="date",
-        direction="backward",
-        allow_exact_matches=True,
+        left, right, left_on="filed_date", right_on="date",
+        direction="backward", allow_exact_matches=True,
     )
     return pd.Series(merged[price_col].to_numpy(), index=dates, dtype=float)
 
@@ -251,22 +233,18 @@ def build_from_mirror_facts(prices: pd.DataFrame, facts: pd.DataFrame) -> tuple[
         if cf.empty:
             continue
 
-        frames = {
-            key: _metric_frame(cf, candidates, flow=key in MIRROR_FLOW_KEYS)
-            for key, candidates in MIRROR_TAGS.items()
-        }
-        dates = pd.DatetimeIndex(sorted(pd.to_datetime(cf["filed"].dropna().unique())))
-        if dates.empty:
+        frames = {key: _metric_frame(cf, candidates, key in MIRROR_FLOW_KEYS) for key, candidates in MIRROR_TAGS.items()}
+        filed_dates = pd.DatetimeIndex(sorted(pd.to_datetime(cf["filed"].dropna().unique())))
+        if filed_dates.empty:
             continue
-        state = pd.DataFrame(index=dates)
-
+        state = pd.DataFrame(index=filed_dates)
         for key in MIRROR_FLOW_KEYS:
-            state[key] = _asof_series(_flow_series(frames[key]), dates)
+            state[key] = _asof_series(_flow_series(frames[key]), filed_dates)
         for key in set(MIRROR_TAGS) - MIRROR_FLOW_KEYS:
             latest, average = _instant_series(frames[key])
-            state[key] = _asof_series(latest, dates)
+            state[key] = _asof_series(latest, filed_dates)
             if key in {"equity", "assets"}:
-                state[f"avg_{key}"] = _asof_series(average, dates)
+                state[f"avg_{key}"] = _asof_series(average, filed_dates)
 
         debt = pd.concat([state["debt"], state["debt_long"]], axis=1).sum(axis=1, min_count=1)
         fcf = state["cfo"] - state["capex"]
@@ -281,40 +259,35 @@ def build_from_mirror_facts(prices: pd.DataFrame, facts: pd.DataFrame) -> tuple[
         state["net_debt_to_equity"] = _safe_div(net_debt, state["equity"])
         state["current_ratio"] = _safe_div(state["assets_current"], state["liabilities_current"])
 
-        price = _price_series_asof(pg, dates)
+        price = _price_series_asof(pg, filed_dates)
         market_cap = state["shares"] * price
         market_cap[(state["shares"] <= 0) | state["shares"].isna() | price.isna()] = np.nan
         state["market_cap"] = market_cap
 
-        tax_rate = _safe_div(state["income_tax"], state["pretax_income"]).clip(lower=0.0, upper=0.40)
+        tax_rate = _safe_div(state["income_tax"], state["pretax_income"]).clip(0.0, 0.40)
         invested_capital = state["equity"] + debt - state["cash"]
         nopat = state["operating_income"] * (1.0 - tax_rate)
         state["roic"] = _safe_div(nopat, invested_capital)
 
-        provenance_cols = {"source_forms": pd.Series("", index=dates), "source_accessions": pd.Series("", index=dates)}
+        source_forms = pd.Series("", index=filed_dates)
+        source_accessions = pd.Series("", index=filed_dates)
         if "form" in cf.columns:
-            provenance_cols["source_forms"] = cf.groupby("filed")["form"].apply(_join_unique).reindex(dates).fillna("")
+            source_forms = cf.groupby("filed")["form"].apply(_join_unique).reindex(filed_dates).fillna("")
         if "accn" in cf.columns:
-            provenance_cols["source_accessions"] = cf.groupby("filed")["accn"].apply(lambda s: _join_unique(s, 5)).reindex(dates).fillna("")
+            source_accessions = cf.groupby("filed")["accn"].apply(lambda s: _join_unique(s, 5)).reindex(filed_dates).fillna("")
 
         out = pd.DataFrame({
             "ticker": ticker,
             "cik": cik,
-            "available_date": dates,
-            "roe": state["roe"],
-            "roic": state["roic"],
-            "roa": state["roa"],
-            "operating_margin": state["operating_margin"],
-            "fcf_margin": state["fcf_margin"],
-            "fcf_to_net_income": state["fcf_to_net_income"],
-            "asset_turnover": state["asset_turnover"],
-            "debt_to_equity": state["debt_to_equity"],
-            "net_debt_to_equity": state["net_debt_to_equity"],
-            "current_ratio": state["current_ratio"],
-            "market_cap": state["market_cap"],
+            "source_filed_date": filed_dates,
+            "available_date": filed_dates + AVAILABILITY_LAG,
+            "roe": state["roe"], "roic": state["roic"], "roa": state["roa"],
+            "operating_margin": state["operating_margin"], "fcf_margin": state["fcf_margin"],
+            "fcf_to_net_income": state["fcf_to_net_income"], "asset_turnover": state["asset_turnover"],
+            "debt_to_equity": state["debt_to_equity"], "net_debt_to_equity": state["net_debt_to_equity"],
+            "current_ratio": state["current_ratio"], "market_cap": state["market_cap"],
             "fundamental_source": "sec_companyfacts_mirror_pit",
-            "source_forms": provenance_cols["source_forms"],
-            "source_accessions": provenance_cols["source_accessions"],
+            "source_forms": source_forms, "source_accessions": source_accessions,
         })
         metric_cols = ["roe", "fcf_margin", "debt_to_equity", "net_debt_to_equity", "market_cap"]
         out = out[out[metric_cols].notna().any(axis=1)].copy()
@@ -322,15 +295,11 @@ def build_from_mirror_facts(prices: pd.DataFrame, facts: pd.DataFrame) -> tuple[
             rows.append(out)
             built_tickers.add(ticker)
             built_ciks.add(cik)
-
         for key, frame in frames.items():
             audits.append({
-                "ticker": ticker,
-                "cik": cik,
-                "metric": key,
+                "ticker": ticker, "cik": cik, "metric": key,
                 "selected_tags": ",".join(sorted(frame["tag"].dropna().unique().tolist())) if not frame.empty else "",
-                "fact_contexts": int(len(frame)),
-                "pair_output_rows": int(len(out)),
+                "fact_contexts": int(len(frame)), "pair_output_rows": int(len(out)),
             })
         if pair_i % 100 == 0 or pair_i == len(pairs):
             print(f"[fundamentals] processed {pair_i}/{len(pairs)} ticker-CIK pairs; built={len(built_tickers)} tickers")
@@ -338,19 +307,18 @@ def build_from_mirror_facts(prices: pd.DataFrame, facts: pd.DataFrame) -> tuple[
     result = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
     if result.empty:
         raise RuntimeError("SEC mirror facts produced no point-in-time fundamentals")
-    result["available_date"] = pd.to_datetime(result["available_date"])
-    result = result.sort_values(["ticker", "cik", "available_date"]).drop_duplicates(
-        ["ticker", "cik", "available_date"], keep="last"
-    )
+    for col in ["source_filed_date", "available_date"]:
+        result[col] = pd.to_datetime(result[col])
+    result = result.sort_values(["ticker", "cik", "available_date"]).drop_duplicates(["ticker", "cik", "available_date"], keep="last")
+    result["source_filed_date"] = result["source_filed_date"].dt.date.astype(str)
     result["available_date"] = result["available_date"].dt.date.astype(str)
     audit = pd.DataFrame(audits)
     metadata = {
         "mode": "sec_companyfacts_mirror_pit",
-        "availability_rule": "SEC filed date from raw Company Facts mirror",
-        "built_tickers": len(built_tickers),
-        "built_ciks": len(built_ciks),
-        "price_tickers": int(p["ticker"].nunique()),
-        "price_ciks": int(p["cik"].nunique()),
+        "availability_rule": "SEC filed date + 1 calendar day; next observed trading day consumes the snapshot",
+        "availability_lag_days": 1,
+        "built_tickers": len(built_tickers), "built_ciks": len(built_ciks),
+        "price_tickers": int(p["ticker"].nunique()), "price_ciks": int(p["cik"].nunique()),
         "ticker_coverage": len(built_tickers) / p["ticker"].nunique() if p["ticker"].nunique() else 0.0,
         "cik_coverage": len(built_ciks) / p["cik"].nunique() if p["cik"].nunique() else 0.0,
         "multi_cik_tickers": multi_cik_tickers,
@@ -370,7 +338,6 @@ def main() -> None:
     parser.add_argument("--source")
     parser.add_argument("--mirror-manifest")
     args = parser.parse_args()
-
     prices = read_table(args.prices)
     facts = read_table(args.facts)
     result, audit, metadata = build_from_mirror_facts(prices, facts)
@@ -381,13 +348,10 @@ def main() -> None:
         if args.mirror_manifest and Path(args.mirror_manifest).exists():
             upstream = json.loads(Path(args.mirror_manifest).read_text(encoding="utf-8"))
             metadata["upstream"] = {
-                "upstream_repo": upstream.get("upstream_repo"),
-                "release_tag": upstream.get("release_tag"),
-                "release_id": upstream.get("release_id"),
-                "published_at": upstream.get("published_at"),
+                "upstream_repo": upstream.get("upstream_repo"), "release_tag": upstream.get("release_tag"),
+                "release_id": upstream.get("release_id"), "published_at": upstream.get("published_at"),
                 "compact_output_sha256": upstream.get("compact_output_sha256"),
-                "input_ciks": upstream.get("input_ciks"),
-                "matched_ciks": upstream.get("matched_ciks"),
+                "input_ciks": upstream.get("input_ciks"), "matched_ciks": upstream.get("matched_ciks"),
             }
         Path(args.source).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print(
