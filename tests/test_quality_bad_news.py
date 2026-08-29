@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.strategies.quality_bad_news import QualityDipConfig, generate_trades
+from src.strategies.quality_bad_news import QualityDipConfig, generate_trades, prepare_features
 
 
 def test_point_in_time_quality_filter_and_trade_generation():
@@ -44,3 +44,25 @@ def test_future_fundamentals_are_not_used():
     })
     trades = generate_trades(prices, fundamentals, QualityDipConfig(drop_threshold=-0.10, wait_days=0, hold_days=1))
     assert trades.empty
+
+
+def test_prepare_features_normalizes_mixed_datetime_resolution():
+    prices = pd.DataFrame({
+        "ticker": ["AAA", "AAA"],
+        "date": pd.Series(["2025-01-02", "2025-01-03"], dtype="datetime64[ms]"),
+        "open": [100.0, 101.0],
+        "close": [100.0, 101.0],
+    })
+    fundamentals = pd.DataFrame({
+        "ticker": ["AAA"],
+        "available_date": pd.Series(["2025-01-01"], dtype="datetime64[us]"),
+        "roe": [0.20],
+        "fcf_margin": [0.10],
+        "debt_to_equity": [0.4],
+        "current_ratio": [1.8],
+        "market_cap": [20_000_000_000],
+    })
+    features = prepare_features(prices, fundamentals)
+    assert str(features["date"].dtype) == "datetime64[ns]"
+    assert str(features["available_date"].dtype) == "datetime64[ns]"
+    assert features["roe"].tolist() == [0.20, 0.20]
