@@ -99,11 +99,21 @@ def main() -> None:
         row.update(_prefix(summarize_trades(splits["train"]), "train"))
         row.update(_prefix(summarize_trades(splits["validation"]), "validation"))
         row.update(_prefix(summarize_trades(splits["oos"]), "oos"))
-        ci_low, ci_high = bootstrap_mean_ci(splits["oos"]["net_return"] if not splits["oos"].empty else [], seed=1000 + i)
-        row["oos_ci_low"], row["oos_ci_high"] = ci_low, ci_high
+
+        validation_ci_low, validation_ci_high = bootstrap_mean_ci(
+            splits["validation"]["net_return"] if not splits["validation"].empty else [], seed=500 + i
+        )
+        oos_ci_low, oos_ci_high = bootstrap_mean_ci(
+            splits["oos"]["net_return"] if not splits["oos"].empty else [], seed=1000 + i
+        )
+        row["validation_ci_low"], row["validation_ci_high"] = validation_ci_low, validation_ci_high
+        row["oos_ci_low"], row["oos_ci_high"] = oos_ci_low, oos_ci_high
+
         p_metrics, _, _ = simulator.run(trades)
+        validation_p_metrics, _, _ = simulator.run(splits["validation"])
         oos_p_metrics, _, _ = simulator.run(splits["oos"])
         row.update({f"portfolio_{k}": v for k, v in p_metrics.to_dict().items()})
+        row.update({f"validation_portfolio_{k}": v for k, v in validation_p_metrics.to_dict().items()})
         row.update({f"oos_portfolio_{k}": v for k, v in oos_p_metrics.to_dict().items()})
         row.update({
             "variant_id": stable_config_hash(asdict(cfg)), "drop_threshold": drop, "wait_days": wait,
@@ -114,10 +124,13 @@ def main() -> None:
             print(f"Completed {i + 1}/384 variants")
 
     summary = add_neighbor_robustness(pd.DataFrame(rows)).sort_values(
-        ["robustness_score", "oos_avg_return", "oos_trades"], ascending=[False, False, False]
+        ["selection_score", "validation_avg_return", "validation_trades"], ascending=[False, False, False]
     ).reset_index(drop=True)
     summary.to_csv(output / "parameter_sweep.csv", index=False)
     summary.head(25).to_csv(output / "leaderboard.csv", index=False)
+    summary.pivot_table(index="drop_threshold", columns="hold_days", values="validation_avg_return", aggfunc="median").to_csv(output / "heatmap_validation_return.csv")
+    summary.pivot_table(index="drop_threshold", columns="hold_days", values="validation_portfolio_sharpe", aggfunc="median").to_csv(output / "heatmap_validation_portfolio_sharpe.csv")
+    # OOS heatmaps are diagnostic only and are never read by the selection score.
     summary.pivot_table(index="drop_threshold", columns="hold_days", values="oos_avg_return", aggfunc="median").to_csv(output / "heatmap_oos_return.csv")
     summary.pivot_table(index="drop_threshold", columns="hold_days", values="oos_portfolio_sharpe", aggfunc="median").to_csv(output / "heatmap_oos_portfolio_sharpe.csv")
 
@@ -147,7 +160,8 @@ def main() -> None:
         metadata={
             "train_end": train_end.date().isoformat(), "validation_end": validation_end.date().isoformat(),
             "test_start": (validation_end + pd.Timedelta(days=1)).date().isoformat(), "split_source": split_source,
-            "selection_rule": "robustness score emphasizes OOS return, OOS Sharpe, neighboring parameters, validation sign, trade count and bootstrap CI",
+            "split_rule": "entry-date split; train and validation require exit_date on or before their cutoff, so boundary-crossing outcomes are purged",
+            "selection_rule": "selection_score uses only train/validation return, Sharpe, neighboring validation parameters, validation trade count and validation bootstrap CI; OOS is never used for ranking",
             "bulk_price_source": "FINSABER-2 when supplied by the automated pipeline",
         },
     )
@@ -155,22 +169,24 @@ def main() -> None:
 
     cols = [
         "variant_id", "drop_threshold", "wait_days", "hold_days", "min_quality_percentile",
-        "require_stabilization", "oos_trades", "oos_avg_return", "oos_sharpe", "oos_ci_low", "oos_ci_high",
+        "require_stabilization", "validation_trades", "validation_avg_return", "validation_sharpe",
+        "validation_ci_low", "validation_ci_high", "neighbor_validation_positive_fraction", "selection_score",
+        "oos_trades", "oos_avg_return", "oos_sharpe", "oos_ci_low", "oos_ci_high",
         "oos_portfolio_total_return", "oos_portfolio_sharpe", "oos_portfolio_max_drawdown",
-        "neighbor_positive_fraction", "robustness_score",
     ]
     report = [
         "# Quality-dip robustness report", "", f"Experiment: `{manifest['experiment_id']}`",
-        f"Train through: **{train_end.date()}**; validation through: **{validation_end.date()}**; later trades are OOS.",
-        f"Split source: **{split_source}**.",
+        f"Train through: **{train_end.date()}**; validation through: **{validation_end.date()}**; later entries are OOS.",
+        f"Split source: **{split_source}**. Train/validation trades crossing a cutoff are purged until their outcomes are fully observable.",
         f"Grid: **{len(rows)} variants** = 4 drops × 3 waits × 4 holds × 4 quality percentiles × stabilization on/off.",
-        "", "The ranking is deliberately not the best in-sample Sharpe. It rewards OOS performance and parameter neighborhoods.",
-        "", "## Top robust variants", "", _markdown_table(summary.head(10), cols), "", "## Interpretation guardrails", "",
-        "- `oos_ci_low > 0` is stronger evidence than a positive point estimate alone.",
-        "- Neighbor stability matters: an isolated winning cell is treated as fragile.",
+        "", "Variant ranking is determined strictly from train + validation. OOS return, Sharpe, CI and portfolio results are reported only after that ranking is fixed.",
+        "", "## Top validation-selected variants and untouched OOS results", "", _markdown_table(summary.head(10), cols), "", "## Interpretation guardrails", "",
+        "- OOS columns do not participate in `selection_score`; changing only OOS values cannot change the leaderboard order.",
+        "- `oos_ci_low > 0` is stronger post-selection evidence than a positive OOS point estimate alone.",
+        "- Neighbor stability is measured on validation performance, not OOS performance.",
         "- Portfolio metrics enforce capital limits and overlapping-position constraints.",
         "- FINSABER supplies broad historical/delisted prices, but quality results include only tickers with causal fundamental coverage; see `research_coverage.json`.",
-        "- Historical membership is still enforced on the signal date; a price record alone never implies S&P 500 membership.",
+        "- Historical membership is enforced on the signal date; a price record alone never implies S&P 500 membership.",
     ]
     (output / "robustness_report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     print(summary.head(25)[cols].to_string(index=False))
