@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 from scripts.build_sec_fundamentals import build_one
@@ -67,7 +68,9 @@ def test_fundamentals_never_use_future_filing():
     may = rows[rows["available_date"] == "2023-05-01"].iloc[0]
     feb = rows[rows["available_date"] == "2024-02-01"].iloc[0]
 
-    # The May filing must use equity 200, never the future 250 value.
+    # The May filing must use only information then available. TTM ROE is
+    # intentionally missing until four quarterly observations exist.
     assert may["market_cap"] == 200.0
     assert may["current_ratio"] == 2.0
-    assert feb["roe"] > may["roe"]
+    assert np.isnan(may["roe"])
+    assert np.isfinite(feb["roe"])
