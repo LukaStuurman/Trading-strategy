@@ -1,6 +1,6 @@
 # Trading-strategy
 
-Reproducible Python research framework for systematic trading ideas. The project is intentionally smaller than Lean/Zipline/Nautilus, but borrows the parts that matter for trustworthy research: point-in-time data, explicit universe membership, data validation gates, portfolio constraints, experiment fingerprints and out-of-sample robustness testing.
+Reproducible Python research framework for systematic trading ideas. The project is intentionally smaller than Lean/Zipline/Nautilus, but borrows the parts that matter for trustworthy research: causal data, explicit historical-universe membership, hard validation gates, portfolio constraints, experiment fingerprints and out-of-sample robustness testing.
 
 ## Current strategies
 
@@ -13,11 +13,11 @@ Reproducible Python research framework for systematic trading ideas. The project
 ## Research architecture
 
 ```text
-raw prices + SEC filings + historical index snapshots
+raw prices + fundamentals + historical index snapshots
                     |
               validation gate
                     |
-       point-in-time feature assembly
+       causal feature assembly
                     |
        historical universe membership
                     |
@@ -34,16 +34,19 @@ raw prices + SEC filings + historical index snapshots
 
 ### Data correctness rules
 
-- SEC values become usable on the **filing date**, never the fiscal period end.
+- Exact SEC values become usable on the **filing date**, never the fiscal period end.
+- When `data.sec.gov` blocks a GitHub-hosted runner, the pipeline uses a clearly labelled **Tenline annual SEC-derived fallback** pinned to an upstream Git commit.
+- The fallback never pretends to know exact filing dates: availability is conservatively set to `max(period_end + 120 days, Dec 31 of the latest SEC accession year referenced in provenance)`. This deliberately sacrifices freshness to prevent later comparative/restated values leaking backwards.
 - Historical S&P 500 membership is stored as compact `[start_date, end_date)` intervals.
 - Current constituents are never silently projected into the past.
 - Price files fail validation when histories are implausibly short, duplicated or internally inconsistent.
+- Yahoo fallback OHLC is split/dividend adjusted for return signals, while `raw_close` is retained separately for historical market-cap alignment with as-reported share counts.
 - Input files receive SHA-256 fingerprints in each experiment manifest.
 - Every parameter configuration gets a deterministic variant ID.
 
 ## Quality model
 
-The absolute quality gate currently requires:
+The preferred exact-SEC quality gate requires:
 
 - ROE >= 12%
 - FCF margin >= 5%
@@ -54,16 +57,19 @@ The absolute quality gate currently requires:
 SEC processing also derives, when available:
 
 - ROA
+- ROIC / operating-quality inputs
 - operating margin
 - FCF / net income
 - asset turnover
 - net debt / equity
 
+The annual Tenline fallback does not expose gross debt/equity or current ratio. In that labelled mode the gate still requires ROE, FCF margin, historical market cap and **net debt/equity <= 1.0**; current ratio is explicitly treated as unavailable rather than invented.
+
 At each trading date the latest available fundamentals for all stocks are ranked cross-sectionally. The strategy can require a minimum quality percentile in addition to the absolute gate.
 
 ## Quality-dip research grid
 
-The default sweep now runs **384 variants**:
+The default sweep runs **384 variants**:
 
 - drop: -5%, -10%, -15%, -20%
 - wait: 0, 1, 2 trading days
@@ -107,16 +113,18 @@ The simulator marks active positions to daily close and realizes the strategy's 
 ```bash
 python scripts/download_real_data.py \
   --tickers AAPL,MSFT,GOOGL,AMZN,META,NVDA,JPM,COST,HD,NKE \
-  --start 2000-01-01
+  --start 2000-01-01 \
+  --sec-soft-fail
 
 python scripts/build_universe.py \
   --history data/real/raw/sp500_historical_components.csv \
   --output data/real/universe_intervals.csv
 
-python scripts/build_sec_fundamentals.py \
+python scripts/build_fundamentals.py \
   --prices data/real/prices.csv \
   --output data/real/fundamentals.csv \
-  --audit data/real/fundamentals_audit.csv
+  --audit data/real/fundamentals_audit.csv \
+  --source data/real/fundamentals_source.json
 
 python scripts/validate_research_data.py \
   --prices data/real/prices.csv \
@@ -143,14 +151,23 @@ python scripts/run_quality_dip_sweep.py \
 - `heatmap_oos_portfolio_sharpe.csv` — median portfolio Sharpe surface
 - `top_variant_trades.csv` — trades for the leading configurations
 
+Data provenance is also stored in:
+
+- `data/real/download_manifest.json`
+- `data/real/price_sources.json`
+- `data/real/fundamentals_source.json`
+- `data/real/validation_market.json`
+- `data/real/validation_full.json`
+
 ## Data sources
 
 - Daily OHLCV: Stooq with Yahoo chart API fallback
 - Historical S&P 500 composition: `hanshof/sp500_constituents`
-- Point-in-time fundamentals: SEC EDGAR Company Facts
+- Preferred point-in-time fundamentals: SEC EDGAR Company Facts
+- Hosted-runner fallback: `debjitmukherjee1/tenline`, pinned Git commit, annual SEC-derived data with conservative availability
 - Earnings sample: Bloomberg-derived 2016 sample from `pingfcc99/Earnings-surprise-on-stock-price`
 
-The current automated workflow starts with ten large stocks to validate the full pipeline. That is **not** a survivorship-bias-free final research universe. The historical membership layer is already in place for expansion to the full historical S&P 500 set, but delisted-security price availability still needs explicit coverage before broad results should be treated as definitive.
+The current automated workflow starts with ten large stocks to validate the full research pipeline. That is **not** a survivorship-bias-free final research universe. The historical membership layer is already in place for expansion to the full historical S&P 500 set, but delisted-security price coverage still needs explicit coverage before broad results should be treated as definitive. Results produced from the Tenline fallback should also be treated as a conservative pipeline-validation study rather than a substitute for exact quarterly filing-date fundamentals.
 
 ## Tests
 
@@ -158,7 +175,7 @@ The current automated workflow starts with ten large stocks to validate the full
 pytest -q
 ```
 
-Tests cover point-in-time filing use, historical universe intervals, data validation, stabilization timing, portfolio position limits and deterministic experiment IDs.
+Tests cover point-in-time filing use, historical universe intervals, data validation, conservative fallback availability, fallback leverage semantics, stabilization timing, portfolio position limits and deterministic experiment IDs.
 
 ## Disclaimer
 
