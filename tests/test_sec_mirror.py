@@ -39,7 +39,9 @@ def test_mirror_fundamentals_use_next_day_after_filed_date_and_do_not_look_ahead
         _fact("AssetsCurrent", 300.0), _fact("LiabilitiesCurrent", 150.0),
         _fact("CashAndCashEquivalentsAtCarryingValue", 20.0),
         _fact("ShortTermBorrowings", 20.0), _fact("LongTermDebtNoncurrent", 80.0),
-        _fact("EntityCommonStockSharesOutstanding", 100.0, unit="shares"),
+        # Some issuers expose the US-GAAP balance-sheet tag instead of the DEI
+        # cover-page tag. It must still produce a causal market-cap estimate.
+        _fact("CommonStockSharesOutstanding", 100.0, unit="shares"),
         _fact("Revenues", 100.0, filed="2026-02-15", start="2025-01-01", end="2025-12-31", accn="0001-26-000001"),
         _fact("NetIncomeLoss", -500.0, filed="2026-02-15", start="2025-01-01", end="2025-12-31", accn="0001-26-000001"),
     ]
@@ -52,6 +54,8 @@ def test_mirror_fundamentals_use_next_day_after_filed_date_and_do_not_look_ahead
     assert math.isclose(first["debt_to_equity"], 0.20)
     assert math.isclose(first["current_ratio"], 2.0)
     assert math.isclose(first["market_cap"], 5000.0)
+    share_audit = audit[audit["metric"] == "shares"].iloc[0]
+    assert "CommonStockSharesOutstanding" in share_audit["selected_tags"]
     assert first["fundamental_source"] == "sec_companyfacts_mirror_pit"
     assert meta["availability_lag_days"] == 1
     assert meta["built_tickers"] == 1
