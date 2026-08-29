@@ -7,9 +7,13 @@ on:
       - '.github/workflows/fetch-real-data.yml'
       - 'scripts/download_real_data.py'
       - 'scripts/build_sec_fundamentals.py'
+      - 'scripts/build_universe.py'
+      - 'scripts/validate_research_data.py'
       - 'scripts/run_quality_dip_sweep.py'
+      - 'src/data/**'
+      - 'src/research/**'
       - 'src/strategies/quality_bad_news.py'
-      - 'src/backtest/metrics.py'
+      - 'src/backtest/**'
       - 'tests/**'
       - 'requirements.txt'
   workflow_dispatch:
@@ -44,6 +48,19 @@ jobs:
             --tickers AAPL,MSFT,GOOGL,AMZN,META,NVDA,JPM,COST,HD,NKE \
             --start 2000-01-01
 
+      - name: Build historical universe intervals
+        run: |
+          python scripts/build_universe.py \
+            --history data/real/raw/sp500_historical_components.csv \
+            --output data/real/universe_intervals.csv
+
+      - name: Validate market data before research
+        run: |
+          python scripts/validate_research_data.py \
+            --prices data/real/prices.csv \
+            --universe data/real/universe_intervals.csv \
+            --report data/real/validation_market.json
+
       - name: Build point-in-time SEC fundamentals
         run: |
           python scripts/build_sec_fundamentals.py \
@@ -51,20 +68,31 @@ jobs:
             --output data/real/fundamentals.csv \
             --audit data/real/fundamentals_audit.csv
 
-      - name: Run all 48 quality-dip variants
+      - name: Validate full point-in-time research dataset
+        run: |
+          python scripts/validate_research_data.py \
+            --prices data/real/prices.csv \
+            --fundamentals data/real/fundamentals.csv \
+            --universe data/real/universe_intervals.csv \
+            --report data/real/validation_full.json
+
+      - name: Run 384 quality-dip robustness variants
         run: |
           python scripts/run_quality_dip_sweep.py \
             --prices data/real/prices.csv \
             --fundamentals data/real/fundamentals.csv \
-            --output results/quality_dip_real
+            --universe data/real/universe_intervals.csv \
+            --output results/quality_dip_real \
+            --initial-capital 10000 \
+            --max-positions 10 \
+            --max-position-fraction 0.10
 
-      - name: Keep reproducible backtest files
+      - name: Keep reproducible membership sources
         run: |
-          mkdir -p data/real
           cp data/real/raw/sp500_historical_components.csv data/real/sp500_historical_components.csv
           cp data/real/raw/sp500_current_constituents.csv data/real/sp500_current_constituents.csv
 
-      - name: Commit derived real data and results
+      - name: Commit derived real data and research results
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -73,17 +101,26 @@ jobs:
             data/real/price_sources.json \
             data/real/fundamentals.csv \
             data/real/fundamentals_audit.csv \
+            data/real/universe_intervals.csv \
+            data/real/validation_market.json \
+            data/real/validation_full.json \
             data/real/sp500_historical_components.csv \
             data/real/sp500_current_constituents.csv \
             data/real/download_manifest.json
-          git add -f results/quality_dip_real/parameter_sweep.csv
-          if [ -f results/quality_dip_real/all_trades.csv ]; then
-            git add -f results/quality_dip_real/all_trades.csv
+          git add -f \
+            results/quality_dip_real/parameter_sweep.csv \
+            results/quality_dip_real/leaderboard.csv \
+            results/quality_dip_real/experiment_manifest.json \
+            results/quality_dip_real/robustness_report.md \
+            results/quality_dip_real/heatmap_oos_return.csv \
+            results/quality_dip_real/heatmap_oos_portfolio_sharpe.csv
+          if [ -f results/quality_dip_real/top_variant_trades.csv ]; then
+            git add -f results/quality_dip_real/top_variant_trades.csv
           fi
           if git diff --cached --quiet; then
             echo 'No data changes.'
           else
-            git commit -m 'data: refresh real fundamentals and quality-dip backtests'
+            git commit -m 'data: refresh validated robustness research'
             git pull --rebase origin main
             git push
           fi
