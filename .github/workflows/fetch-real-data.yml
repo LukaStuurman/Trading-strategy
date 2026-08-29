@@ -15,6 +15,7 @@ on:
       - 'scripts/build_universe.py'
       - 'scripts/validate_research_data.py'
       - 'scripts/run_quality_dip_sweep.py'
+      - 'scripts/run_outlier_sensitivity.py'
       - 'src/data/**'
       - 'src/research/**'
       - 'src/strategies/quality_bad_news.py'
@@ -135,6 +136,18 @@ jobs:
             --max-position-fraction 0.10 \
             --train-end 2020-10-12 \
             --validation-end 2023-05-19
+      - name: Stress test extreme adjusted-price moves
+        run: |
+          python scripts/run_outlier_sensitivity.py \
+            --prices data/real/research_prices.parquet \
+            --trades results/quality_dip_real/top_variant_trades.csv \
+            --leaderboard results/quality_dip_real/leaderboard.csv \
+            --output results/quality_dip_real \
+            --oos-start 2023-05-20 \
+            --threshold 3.0 \
+            --initial-capital 10000 \
+            --max-positions 10 \
+            --max-position-fraction 0.10
       - name: Keep reproducible membership sources
         run: |
           cp data/real/raw/sp_500_historical_components.csv data/real/sp500_historical_components.csv
@@ -162,7 +175,10 @@ jobs:
             results/quality_dip_real/experiment_manifest.json \
             results/quality_dip_real/robustness_report.md \
             results/quality_dip_real/heatmap_oos_return.csv \
-            results/quality_dip_real/heatmap_oos_portfolio_sharpe.csv
+            results/quality_dip_real/heatmap_oos_portfolio_sharpe.csv \
+            results/quality_dip_real/price_outliers.csv \
+            results/quality_dip_real/outlier_sensitivity.csv \
+            results/quality_dip_real/outlier_sensitivity.md
           if [ -f results/quality_dip_real/top_variant_trades.csv ]; then
             git add -f results/quality_dip_real/top_variant_trades.csv
           fi
