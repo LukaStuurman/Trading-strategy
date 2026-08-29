@@ -1,0 +1,17 @@
+{
+  "errors": [],
+  "warnings": [],
+  "stats": {
+    "prices": {
+      "rows": 62754,
+      "tickers": 10,
+      "start": "2000-01-03",
+      "end": "2026-08-27"
+    },
+    "universe": {
+      "rows": 1177,
+      "tickers": 1128
+    }
+  },
+  "ok": true
+}

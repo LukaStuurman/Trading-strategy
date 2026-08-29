@@ -1,0 +1,14 @@
+{
+  "mode": "tenline_sec_annual_conservative",
+  "upstream_repo": "debjitmukherjee1/tenline",
+  "upstream_commit": "97dbe07acdb96e0e776a07017f97f77941f67d8b",
+  "availability_rule": "max(period_end + 120 days, December 31 of latest SEC accession year referenced by provenance)",
+  "reason": "Exact data.sec.gov Company Facts unavailable from the GitHub-hosted runner",
+  "limitations": [
+    "annual rather than quarterly fundamentals",
+    "availability deliberately delayed to avoid comparative/restatement look-ahead",
+    "current ratio and gross debt/equity are unavailable in Tenline output",
+    "market cap uses diluted shares times historical unadjusted/raw close where available"
+  ],
+  "failed_tickers": {}
+}
