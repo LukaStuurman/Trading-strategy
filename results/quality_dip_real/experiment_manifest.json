@@ -1,25 +1,25 @@
 {
-  "created_at_utc": "2026-08-29T19:40:51.560993+00:00",
+  "created_at_utc": "2026-08-29T20:50:17.971021+00:00",
   "data": {
     "finsaber_source_manifest": {
-      "bytes": 9510,
+      "bytes": 14042,
       "path": "data/real/finsaber_price_manifest.json",
-      "sha256": "6f8602f741e8006c55f46583bdcc856997595af50a5ebb16a2bc86c47b4bd350"
+      "sha256": "faf53678563de2b76f7338378c79acbcfd30a244b5075be3fce958c7912ecc8e"
     },
     "fundamentals": {
-      "bytes": 10918267,
+      "bytes": 11475746,
       "path": "data/real/fundamentals.csv",
-      "sha256": "969a114cfc0da9a6481e6a8381117c6a348978080e55530b0aa2774b6a0c5308"
+      "sha256": "c5a3794dee0de4c5094e92e0f8a12f2c6c7b1dca7e17d331a6c4233ebe3d2a0f"
     },
     "prices": {
-      "bytes": 105499772,
+      "bytes": 106322284,
       "path": "data/real/research_prices.parquet",
-      "sha256": "b31ff7ae5637e15917036b2273e260e4f9faeea382795b57cfbdf327a28dd053"
+      "sha256": "6018ac017b186abbb21937f94ff5b5c2b0eaa54e79dc0cbbc470cfe3e9d17603"
     },
     "research_coverage": {
-      "bytes": 3487,
+      "bytes": 3440,
       "path": "data/real/research_coverage.json",
-      "sha256": "4ce73ba161f0bb0fc7c99bba386c5cb666a7b6844925866726e4408adb05fa53"
+      "sha256": "9239e0e4959819bdb7aa6d4a570157942325e46613fccdc74a764371b3db0f7e"
     },
     "universe": {
       "bytes": 25711,
@@ -27,11 +27,12 @@
       "sha256": "74eadc642d8f66e2c6c46c760d2a1514f754a3432995857ae2cad293c39c299f"
     }
   },
-  "experiment_id": "2e0b8fd83bd20342",
-  "git_commit": "17afcf41d4bc8526b4777c4bdc9f48d32f246952",
+  "experiment_id": "64ba9742a6b4f70a",
+  "git_commit": "ca84363e82e79ce83e3230cf8871fe412eaed8fc",
   "metadata": {
     "bulk_price_source": "FINSABER-2 when supplied by the automated pipeline",
-    "selection_rule": "robustness score emphasizes OOS return, OOS Sharpe, neighboring parameters, validation sign, trade count and bootstrap CI",
+    "selection_rule": "selection_score uses only train/validation return, Sharpe, neighboring validation parameters, validation trade count and validation bootstrap CI; OOS is never used for ranking",
+    "split_rule": "entry-date split; train and validation require exit_date on or before their cutoff, so boundary-crossing outcomes are purged",
     "split_source": "fixed_cli_dates",
     "test_start": "2023-05-20",
     "train_end": "2020-10-12",

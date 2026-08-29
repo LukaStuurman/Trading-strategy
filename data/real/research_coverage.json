@@ -2,20 +2,20 @@
   "source_prices": "data/real/finsaber_prices.parquet",
   "research_prices": "data/real/research_prices.parquet",
   "price_rows_full": 4901002,
-  "price_rows_research_panel": 2668182,
+  "price_rows_research_panel": 2694322,
   "price_tickers": 1018,
   "historical_universe_tickers": 1126,
   "historical_price_tickers": 958,
-  "fundamental_tickers": 873,
-  "eligible_quality_tickers_before_history_gate": 824,
-  "eligible_quality_tickers": 820,
-  "fundamental_ticker_coverage_of_historical_prices": 0.860125260960334,
-  "research_ticker_coverage_of_historical_prices": 0.8559498956158664,
+  "fundamental_tickers": 877,
+  "eligible_quality_tickers_before_history_gate": 828,
+  "eligible_quality_tickers": 824,
+  "fundamental_ticker_coverage_of_historical_prices": 0.8643006263048016,
+  "research_ticker_coverage_of_historical_prices": 0.860125260960334,
   "minimum_post_fundamental_price_rows": 100,
   "insufficient_post_fundamental_history": {
     "BNI": 1,
     "BXLT": 63,
-    "NOVL": 93,
+    "GAPTQ": 93,
     "WYE": 49
   },
   "missing_fundamental_tickers": [
@@ -69,7 +69,6 @@
     "FLTWQ",
     "FPC",
     "FRC",
-    "GAPTQ",
     "GDT",
     "GP",
     "GPU",
@@ -103,7 +102,6 @@
     "OAT",
     "OK",
     "ONE",
-    "OTIS",
     "OWENQ",
     "PALM",
     "PDG",
@@ -112,7 +110,6 @@
     "PNU",
     "PRD",
     "PSFT",
-    "PSKY",
     "PVN",
     "PWER",
     "PWJ",
@@ -132,7 +129,6 @@
     "SMI",
     "SMS",
     "SOTR",
-    "STI",
     "SUB",
     "TEK",
     "TOS",
@@ -220,7 +216,7 @@
   "panel_end": "2025-12-31",
   "warmup_days_before_first_fundamental": 10,
   "fundamental_source_counts": {
-    "sec_companyfacts_mirror_pit": 43492
+    "sec_companyfacts_mirror_pit": 44107
   },
   "interpretation": "FINSABER removes the price-history survivorship bottleneck, but the quality strategy remains limited to tickers with causal fundamentals and at least the configured amount of post-fundamental price history. Missing/insufficient tickers are reported explicitly and are not treated as failed quality screens."
 }

@@ -75,12 +75,13 @@
     62,
     63
   ],
-  "rows": 1962370,
+  "rows": 2017844,
   "tags": [
     "Assets",
     "AssetsCurrent",
     "CashAndCashEquivalentsAtCarryingValue",
     "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+    "CommonStockSharesOutstanding",
     "EntityCommonStockSharesOutstanding",
     "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
     "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
@@ -434,7 +435,7 @@
       "digest": "sha256:dc2c2f09556e9ee12a05f9b17e6a2ad6e37c9abcf978b2c5332509b80261b34b"
     }
   ],
-  "compact_output_sha256": "d6e6a86f86b0b2bd53423a8967d74b48a9cdd27ae2c21576dfb9154cb0b48bec",
+  "compact_output_sha256": "21365a0cbac3d32ac5f0d5b389b0448c378178c3cb3ed6cd5c4a0a606ea6d2d2",
   "notes": [
     "Only facts filed on or before a simulated date may be used.",
     "Only FINSABER CIKs and quality-model tags are retained.",

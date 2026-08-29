@@ -2,12 +2,12 @@
   "mode": "sec_companyfacts_mirror_pit",
   "availability_rule": "SEC filed date + 1 calendar day; next observed trading day consumes the snapshot",
   "availability_lag_days": 1,
-  "built_tickers": 873,
-  "built_ciks": 846,
+  "built_tickers": 877,
+  "built_ciks": 850,
   "price_tickers": 1018,
   "price_ciks": 989,
-  "ticker_coverage": 0.8575638506876228,
-  "cik_coverage": 0.8554095045500506,
+  "ticker_coverage": 0.8614931237721022,
+  "cik_coverage": 0.8594539939332659,
   "multi_cik_tickers": [
     "AGN",
     "ESRX",
@@ -22,7 +22,7 @@
     "release_tag": "parquet-latest",
     "release_id": 349107102,
     "published_at": "2026-07-05T06:48:16Z",
-    "compact_output_sha256": "d6e6a86f86b0b2bd53423a8967d74b48a9cdd27ae2c21576dfb9154cb0b48bec",
+    "compact_output_sha256": "21365a0cbac3d32ac5f0d5b389b0448c378178c3cb3ed6cd5c4a0a606ea6d2d2",
     "input_ciks": 989,
     "matched_ciks": 881
   }
