@@ -15,28 +15,62 @@ class QualityDipConfig:
     min_roe: float = 0.12
     min_fcf_margin: float = 0.05
     max_debt_to_equity: float = 1.5
+    max_net_debt_to_equity: float = 1.0
     min_current_ratio: float = 1.0
+    allow_missing_current_ratio: bool = True
     min_market_cap: float = 5_000_000_000
     min_quality_percentile: float = 0.0
     require_stabilization: bool = False
     round_trip_cost_bps: float = 10.0
 
 
-CORE_FUNDAMENTALS = ["roe", "fcf_margin", "debt_to_equity", "current_ratio", "market_cap"]
+CORE_FUNDAMENTALS = [
+    "roe", "fcf_margin", "debt_to_equity", "net_debt_to_equity",
+    "current_ratio", "market_cap",
+]
 POSITIVE_QUALITY_FACTORS = [
-    "roe", "fcf_margin", "current_ratio", "roa", "operating_margin",
+    "roe", "roic", "fcf_margin", "current_ratio", "roa", "operating_margin",
     "fcf_to_net_income", "asset_turnover",
 ]
 NEGATIVE_QUALITY_FACTORS = ["debt_to_equity", "net_debt_to_equity"]
 
 
+def _numeric_column(f: pd.DataFrame, name: str) -> pd.Series:
+    if name not in f.columns:
+        return pd.Series(np.nan, index=f.index, dtype=float)
+    return pd.to_numeric(f[name], errors="coerce")
+
+
 def _quality_mask(f: pd.DataFrame, cfg: QualityDipConfig) -> pd.Series:
+    """Absolute quality gate with explicit fallback semantics.
+
+    Exact SEC data normally supplies gross debt/equity and current ratio. The
+    labelled Tenline fallback does not. In that case leverage must still pass
+    using net-debt/equity; missing current ratio is tolerated only because the
+    fallback is annual and other profitability/leverage gates remain mandatory.
+    """
+    roe = _numeric_column(f, "roe")
+    fcf_margin = _numeric_column(f, "fcf_margin")
+    debt_to_equity = _numeric_column(f, "debt_to_equity")
+    net_debt_to_equity = _numeric_column(f, "net_debt_to_equity")
+    current_ratio = _numeric_column(f, "current_ratio")
+    market_cap = _numeric_column(f, "market_cap")
+
+    leverage_ok = (debt_to_equity.notna() & (debt_to_equity <= cfg.max_debt_to_equity)) | (
+        debt_to_equity.isna()
+        & net_debt_to_equity.notna()
+        & (net_debt_to_equity <= cfg.max_net_debt_to_equity)
+    )
+    liquidity_ok = current_ratio >= cfg.min_current_ratio
+    if cfg.allow_missing_current_ratio:
+        liquidity_ok = liquidity_ok | current_ratio.isna()
+
     return (
-        (f["roe"] >= cfg.min_roe)
-        & (f["fcf_margin"] >= cfg.min_fcf_margin)
-        & (f["debt_to_equity"] <= cfg.max_debt_to_equity)
-        & (f["current_ratio"] >= cfg.min_current_ratio)
-        & (f["market_cap"] >= cfg.min_market_cap)
+        (roe >= cfg.min_roe)
+        & (fcf_margin >= cfg.min_fcf_margin)
+        & leverage_ok
+        & liquidity_ok
+        & (market_cap >= cfg.min_market_cap)
     )
 
 
@@ -126,7 +160,8 @@ def generate_trades(
     rows: list[dict] = []
 
     for sig in signals.itertuples(index=False):
-        latest = pd.DataFrame([{c: getattr(sig, c, np.nan) for c in CORE_FUNDAMENTALS}])
+        latest_values = {c: getattr(sig, c, np.nan) for c in CORE_FUNDAMENTALS}
+        latest = pd.DataFrame([latest_values])
         if not bool(_quality_mask(latest, cfg).iloc[0]):
             continue
         quality_percentile = float(getattr(sig, "quality_percentile", np.nan))
@@ -166,6 +201,8 @@ def generate_trades(
             "signal_date": sig.date,
             "signal_return": float(sig.daily_return),
             "quality_percentile": quality_percentile,
+            "fundamental_source": getattr(sig, "fundamental_source", "unknown"),
+            "fundamental_available_date": getattr(sig, "available_date", pd.NaT),
             "entry_date": entry["date"],
             "entry_price": float(entry["open"]),
             "exit_date": exit_["date"],
