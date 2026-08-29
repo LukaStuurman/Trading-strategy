@@ -35,6 +35,11 @@ class ValidationReport:
             raise DataValidationError("; ".join(self.errors))
 
 
+def _instrument_keys(frame: pd.DataFrame) -> list[str]:
+    """Use CIK when present so a recycled ticker remains a different issuer."""
+    return ["ticker", "cik"] if "cik" in frame.columns else ["ticker"]
+
+
 def validate_prices(prices: pd.DataFrame, min_rows_per_ticker: int = 100) -> ValidationReport:
     r = ValidationReport()
     required = {"ticker", "date", "open", "high", "low", "close", "volume"}
@@ -46,19 +51,22 @@ def validate_prices(prices: pd.DataFrame, min_rows_per_ticker: int = 100) -> Val
     p["date"] = pd.to_datetime(p["date"], errors="coerce")
     for c in ["open", "high", "low", "close", "volume"]:
         p[c] = pd.to_numeric(p[c], errors="coerce")
+    keys = _instrument_keys(p)
     r.stats.update({
         "rows": int(len(p)),
         "tickers": int(p["ticker"].nunique()),
+        "instruments": int(p[keys].drop_duplicates().shape[0]),
+        "instrument_key": "+".join(keys),
         "start": None if p["date"].dropna().empty else p["date"].min().date().isoformat(),
         "end": None if p["date"].dropna().empty else p["date"].max().date().isoformat(),
         "min_rows_per_ticker": int(min_rows_per_ticker),
     })
     if p["date"].isna().any():
         r.errors.append(f"{int(p['date'].isna().sum())} invalid dates")
-    dupes = int(p.duplicated(["ticker", "date"]).sum())
+    dupes = int(p.duplicated(keys + ["date"]).sum())
     if dupes:
-        r.errors.append(f"{dupes} duplicate ticker/date rows")
-    short = p.groupby("ticker").size()
+        r.errors.append(f"{dupes} duplicate {'/'.join(keys)}/date rows")
+    short = p.groupby(keys, dropna=False).size()
     short = short[short < min_rows_per_ticker]
     if not short.empty:
         sample = ", ".join(f"{k}={int(v)}" for k, v in short.head(10).items())
@@ -68,8 +76,6 @@ def validate_prices(prices: pd.DataFrame, min_rows_per_ticker: int = 100) -> Val
     if (p[["open", "high", "low", "close"]] <= 0).any(axis=1).any():
         r.errors.append("non-positive OHLC values found")
 
-    # Relative tolerance avoids rejecting otherwise-consistent adjusted bars due
-    # to sub-cent floating point multiplication noise at very large prices.
     magnitude = p[["open", "high", "low", "close"]].abs().max(axis=1).clip(lower=1.0)
     tol = magnitude * 1e-10
     bad_high = p["high"] + tol < p[["open", "close", "low"]].max(axis=1)
@@ -78,7 +84,8 @@ def validate_prices(prices: pd.DataFrame, min_rows_per_ticker: int = 100) -> Val
         r.errors.append(f"OHLC bounds invalid on {int(bad_high.sum() + bad_low.sum())} rows")
     if (p["volume"].fillna(0) < 0).any():
         r.errors.append("negative volume found")
-    ret = p.sort_values(["ticker", "date"]).groupby("ticker")["close"].pct_change()
+
+    ret = p.sort_values(keys + ["date"]).groupby(keys, dropna=False)["close"].pct_change()
     extreme = int((ret.abs() > 3.0).sum())
     r.stats["close_moves_over_300pct"] = extreme
     if extreme:
@@ -95,12 +102,35 @@ def validate_fundamentals(fundamentals: pd.DataFrame) -> ValidationReport:
         return r
     f = fundamentals.copy()
     f["available_date"] = pd.to_datetime(f["available_date"], errors="coerce")
-    r.stats.update({"rows": int(len(f)), "tickers": int(f["ticker"].nunique())})
+    keys = _instrument_keys(f)
+    r.stats.update({
+        "rows": int(len(f)),
+        "tickers": int(f["ticker"].nunique()),
+        "instruments": int(f[keys].drop_duplicates().shape[0]),
+        "instrument_key": "+".join(keys),
+    })
     if f["available_date"].isna().any():
         r.errors.append("invalid available_date values found")
-    dupes = int(f.duplicated(["ticker", "available_date"]).sum())
+    dupes = int(f.duplicated(keys + ["available_date"]).sum())
     if dupes:
-        r.errors.append(f"{dupes} duplicate ticker/available_date rows")
+        r.errors.append(f"{dupes} duplicate {'/'.join(keys)}/available_date rows")
+
+    # If the source provides the original filing date, enforce the conservative
+    # daily-data guard: a snapshot must become available strictly later.
+    if "source_filed_date" in f.columns:
+        filed = pd.to_datetime(f["source_filed_date"], errors="coerce")
+        invalid_filed = filed.isna()
+        if invalid_filed.any():
+            r.errors.append(f"{int(invalid_filed.sum())} invalid source_filed_date values")
+        leaked = filed.notna() & f["available_date"].notna() & (f["available_date"] <= filed)
+        if leaked.any():
+            r.errors.append(f"{int(leaked.sum())} fundamentals are available on/before their SEC filing date")
+        valid_lag = filed.notna() & f["available_date"].notna()
+        if valid_lag.any():
+            lag = (f.loc[valid_lag, "available_date"] - filed.loc[valid_lag]).dt.days
+            r.stats["availability_lag_days_min"] = int(lag.min())
+            r.stats["availability_lag_days_median"] = float(lag.median())
+
     for c in ["roe", "fcf_margin", "debt_to_equity", "current_ratio", "market_cap"]:
         coverage = float(pd.to_numeric(f[c], errors="coerce").notna().mean()) if len(f) else 0.0
         r.stats[f"{c}_coverage"] = coverage
