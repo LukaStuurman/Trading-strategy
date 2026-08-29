@@ -1,12 +1,14 @@
-name: Fetch real historical data
+name: FINSABER quality-dip research
 
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/fetch-real-data.yml'
-      - 'scripts/download_real_data.py'
+      - 'scripts/download_finsaber_prices.py'
+      - 'scripts/download_sp500_membership.py'
       - 'scripts/build_fundamentals.py'
+      - 'scripts/build_research_panel.py'
       - 'scripts/build_sec_fundamentals.py'
       - 'scripts/build_universe.py'
       - 'scripts/validate_research_data.py'
@@ -23,17 +25,27 @@ permissions:
   contents: write
 
 jobs:
-  fetch-and-backtest:
+  finsaber-backtest:
     runs-on: ubuntu-latest
+    timeout-minutes: 240
     env:
       PYTHONPATH: ${{ github.workspace }}
+      HF_HOME: ${{ github.workspace }}/.hf-cache
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
+
+      - name: Cache FINSABER source partitions
+        uses: actions/cache@v4
+        with:
+          path: .hf-cache
+          key: finsaber-v2-prices-${{ runner.os }}-v1
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -41,14 +53,21 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-      - name: Download prices, S&P history and try exact SEC Company Facts
-        env:
-          SEC_USER_AGENT: Trading-strategy 32568576+LukaStuurman@users.noreply.github.com
+      - name: Download and pin FINSABER-2 prices
         run: |
-          python scripts/download_real_data.py \
-            --tickers AAPL,MSFT,GOOGL,AMZN,META,NVDA,JPM,COST,HD,NKE \
-            --start 2000-01-01 \
-            --sec-soft-fail
+          python scripts/download_finsaber_prices.py \
+            --start-year 2000 \
+            --end-year 2025 \
+            --output data/real/finsaber_prices.parquet \
+            --manifest data/real/finsaber_price_manifest.json \
+            --min-rows 4500000 \
+            --min-tickers 750
+
+      - name: Download and pin historical S&P membership
+        run: |
+          python scripts/download_sp500_membership.py \
+            --output-dir data/real/raw \
+            --manifest data/real/sp500_membership_manifest.json
 
       - name: Build historical universe intervals
         run: |
@@ -56,25 +75,36 @@ jobs:
             --history data/real/raw/sp500_historical_components.csv \
             --output data/real/universe_intervals.csv
 
-      - name: Validate market data before research
+      - name: Validate broad FINSABER market data
         run: |
           python scripts/validate_research_data.py \
-            --prices data/real/prices.csv \
+            --prices data/real/finsaber_prices.parquet \
             --universe data/real/universe_intervals.csv \
-            --report data/real/validation_market.json
+            --report data/real/validation_finsaber_market.json \
+            --min-total-price-rows 4500000 \
+            --min-price-tickers 750
 
-      - name: Build fundamentals with exact-SEC-first fallback
+      - name: Build causal fundamentals for available tickers
         run: |
           python scripts/build_fundamentals.py \
-            --prices data/real/prices.csv \
+            --prices data/real/finsaber_prices.parquet \
             --output data/real/fundamentals.csv \
             --audit data/real/fundamentals_audit.csv \
             --source data/real/fundamentals_source.json
 
-      - name: Validate full causal research dataset
+      - name: Build fundamental-covered research panel
+        run: |
+          python scripts/build_research_panel.py \
+            --prices data/real/finsaber_prices.parquet \
+            --fundamentals data/real/fundamentals.csv \
+            --universe data/real/universe_intervals.csv \
+            --output data/real/research_prices.parquet \
+            --coverage data/real/research_coverage.json
+
+      - name: Validate causal quality research panel
         run: |
           python scripts/validate_research_data.py \
-            --prices data/real/prices.csv \
+            --prices data/real/research_prices.parquet \
             --fundamentals data/real/fundamentals.csv \
             --universe data/real/universe_intervals.csv \
             --report data/real/validation_full.json
@@ -82,9 +112,11 @@ jobs:
       - name: Run 384 quality-dip robustness variants
         run: |
           python scripts/run_quality_dip_sweep.py \
-            --prices data/real/prices.csv \
+            --prices data/real/research_prices.parquet \
             --fundamentals data/real/fundamentals.csv \
             --universe data/real/universe_intervals.csv \
+            --source-manifest data/real/finsaber_price_manifest.json \
+            --coverage data/real/research_coverage.json \
             --output results/quality_dip_real \
             --initial-capital 10000 \
             --max-positions 10 \
@@ -95,22 +127,22 @@ jobs:
           cp data/real/raw/sp500_historical_components.csv data/real/sp500_historical_components.csv
           cp data/real/raw/sp500_current_constituents.csv data/real/sp500_current_constituents.csv
 
-      - name: Commit derived real data and research results
+      - name: Commit compact provenance and research outputs
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
-            data/real/prices.csv \
-            data/real/price_sources.json \
+            data/real/finsaber_price_manifest.json \
+            data/real/sp500_membership_manifest.json \
             data/real/fundamentals.csv \
             data/real/fundamentals_audit.csv \
             data/real/fundamentals_source.json \
+            data/real/research_coverage.json \
             data/real/universe_intervals.csv \
-            data/real/validation_market.json \
+            data/real/validation_finsaber_market.json \
             data/real/validation_full.json \
             data/real/sp500_historical_components.csv \
-            data/real/sp500_current_constituents.csv \
-            data/real/download_manifest.json
+            data/real/sp500_current_constituents.csv
           git add -f \
             results/quality_dip_real/parameter_sweep.csv \
             results/quality_dip_real/leaderboard.csv \
@@ -122,9 +154,9 @@ jobs:
             git add -f results/quality_dip_real/top_variant_trades.csv
           fi
           if git diff --cached --quiet; then
-            echo 'No data changes.'
+            echo 'No derived changes.'
           else
-            git commit -m 'data: refresh validated robustness research'
+            git commit -m 'data: refresh FINSABER robustness research'
             git pull --rebase origin main
             git push
           fi

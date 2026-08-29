@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.backtest.metrics import summarize_trades
 from src.backtest.portfolio import PortfolioConfig, PortfolioSimulator
+from src.data.io import read_table
 from src.data.universe import load_universe_intervals
 from src.research.experiment import build_manifest, stable_config_hash, write_manifest
 from src.research.robustness import (
@@ -61,14 +62,16 @@ def main() -> None:
     parser.add_argument("--prices", required=True)
     parser.add_argument("--fundamentals", required=True)
     parser.add_argument("--universe")
+    parser.add_argument("--source-manifest")
+    parser.add_argument("--coverage")
     parser.add_argument("--output", required=True)
     parser.add_argument("--initial-capital", type=float, default=10_000.0)
     parser.add_argument("--max-positions", type=int, default=10)
     parser.add_argument("--max-position-fraction", type=float, default=0.10)
     args = parser.parse_args()
 
-    prices = pd.read_csv(args.prices)
-    fundamentals = pd.read_csv(args.fundamentals)
+    prices = read_table(args.prices)
+    fundamentals = read_table(args.fundamentals)
     universe = load_universe_intervals(args.universe) if args.universe else None
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
@@ -79,6 +82,7 @@ def main() -> None:
     quality_percentiles = [0.0, 0.50, 0.70, 0.80]
     stabilization = [False, True]
 
+    print(f"Preparing causal features for {len(prices):,} price rows / {prices['ticker'].nunique()} tickers")
     prepared = prepare_features(prices, fundamentals, universe)
     train_end, validation_end = chronological_boundaries(prices)
     portfolio_cfg = PortfolioConfig(
@@ -126,6 +130,8 @@ def main() -> None:
             "require_stabilization": stabilize,
         })
         rows.append(row)
+        if (i + 1) % 48 == 0:
+            print(f"Completed {i + 1}/384 variants")
 
     summary = add_neighbor_robustness(pd.DataFrame(rows))
     summary = summary.sort_values(
@@ -135,7 +141,6 @@ def main() -> None:
     summary.to_csv(output / "parameter_sweep.csv", index=False)
     summary.head(25).to_csv(output / "leaderboard.csv", index=False)
 
-    # Median parameter surfaces make isolated lucky cells obvious.
     summary.pivot_table(index="drop_threshold", columns="hold_days", values="oos_avg_return", aggfunc="median").to_csv(output / "heatmap_oos_return.csv")
     summary.pivot_table(index="drop_threshold", columns="hold_days", values="oos_portfolio_sharpe", aggfunc="median").to_csv(output / "heatmap_oos_portfolio_sharpe.csv")
 
@@ -161,6 +166,10 @@ def main() -> None:
     data_files = {"prices": args.prices, "fundamentals": args.fundamentals}
     if args.universe:
         data_files["universe"] = args.universe
+    if args.source_manifest:
+        data_files["finsaber_source_manifest"] = args.source_manifest
+    if args.coverage:
+        data_files["research_coverage"] = args.coverage
     manifest = build_manifest(
         name="quality_dip_research",
         parameters=grid,
@@ -170,6 +179,7 @@ def main() -> None:
             "validation_end": validation_end.date().isoformat(),
             "test_start": (validation_end + pd.Timedelta(days=1)).date().isoformat(),
             "selection_rule": "robustness score emphasizes OOS return, OOS Sharpe, neighboring parameters, validation sign, trade count and bootstrap CI",
+            "bulk_price_source": "FINSABER-2 when supplied by the automated pipeline",
         },
     )
     write_manifest(manifest, output / "experiment_manifest.json")
@@ -199,7 +209,8 @@ def main() -> None:
         "- `oos_ci_low > 0` is stronger evidence than a positive point estimate alone.",
         "- Neighbor stability matters: an isolated winning cell is treated as fragile.",
         "- Portfolio metrics enforce capital limits and overlapping-position constraints.",
-        "- A historical universe filters signal eligibility; it does not magically restore unavailable delisted price histories.",
+        "- FINSABER supplies broad historical/delisted prices, but quality results include only tickers with causal fundamental coverage; see `research_coverage.json`.",
+        "- Historical membership is still enforced on the signal date; a price record alone never implies S&P 500 membership.",
     ]
     (output / "robustness_report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     print(summary.head(25)[cols].to_string(index=False))

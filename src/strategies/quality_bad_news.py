@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from src.data.universe import attach_membership
+from src.data.universe import attach_membership, normalize_ticker
 
 
 @dataclass(frozen=True)
@@ -42,13 +42,7 @@ def _numeric_column(f: pd.DataFrame, name: str) -> pd.Series:
 
 
 def _quality_mask(f: pd.DataFrame, cfg: QualityDipConfig) -> pd.Series:
-    """Absolute quality gate with explicit fallback semantics.
-
-    Exact SEC data normally supplies gross debt/equity and current ratio. The
-    labelled Tenline fallback does not. In that case leverage must still pass
-    using net-debt/equity; missing current ratio is tolerated only because the
-    fallback is annual and other profitability/leverage gates remain mandatory.
-    """
+    """Absolute quality gate with explicit fallback semantics."""
     roe = _numeric_column(f, "roe")
     fcf_margin = _numeric_column(f, "fcf_margin")
     debt_to_equity = _numeric_column(f, "debt_to_equity")
@@ -97,28 +91,24 @@ def prepare_features(
     fundamentals: pd.DataFrame,
     universe: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Build a causal daily feature table once for a whole parameter sweep.
-
-    Every price row receives only the most recent fundamental row whose
-    `available_date <= date`. Quality percentiles are then calculated
-    cross-sectionally using only those as-of values.
-    """
+    """Build the causal daily feature table once for a full parameter sweep."""
     p = prices.copy()
     f = fundamentals.copy()
     p["date"] = pd.to_datetime(p["date"])
     f["available_date"] = pd.to_datetime(f["available_date"])
-    p["ticker"] = p["ticker"].astype(str).str.upper()
-    f["ticker"] = f["ticker"].astype(str).str.upper()
+    p["ticker"] = p["ticker"].map(normalize_ticker)
+    f["ticker"] = f["ticker"].map(normalize_ticker)
     p = p.sort_values(["ticker", "date"]).reset_index(drop=True)
     f = f.sort_values(["ticker", "available_date"]).reset_index(drop=True)
-    p["daily_return"] = p.groupby("ticker")["close"].pct_change()
+    p["daily_return"] = p.groupby("ticker", sort=False)["close"].pct_change()
 
-    merged = []
     fundamental_cols = [c for c in f.columns if c != "ticker"]
+    fundamental_groups = {ticker: g[fundamental_cols].sort_values("available_date") for ticker, g in f.groupby("ticker", sort=False)}
+    merged = []
     for ticker, gp in p.groupby("ticker", sort=False):
-        gf = f[f["ticker"] == ticker][fundamental_cols].sort_values("available_date")
+        gf = fundamental_groups.get(ticker)
         gp = gp.sort_values("date")
-        if gf.empty:
+        if gf is None or gf.empty:
             x = gp.copy()
             for col in fundamental_cols:
                 x[col] = pd.NaT if col == "available_date" else np.nan
@@ -132,10 +122,23 @@ def prepare_features(
                 allow_exact_matches=True,
             )
         merged.append(x)
+
     out = pd.concat(merged, ignore_index=True) if merged else p.copy()
     out = attach_membership(out, universe)
     out = _attach_quality_percentile(out)
-    return out.sort_values(["ticker", "date"]).reset_index(drop=True)
+    out = out.sort_values(["ticker", "date"]).reset_index(drop=True)
+    out["_ticker_row"] = out.groupby("ticker", sort=False).cumcount().astype("int32")
+    return out
+
+
+def _empty_trades() -> pd.DataFrame:
+    return pd.DataFrame(columns=[
+        "ticker", "signal_date", "signal_return", "quality_percentile",
+        "fundamental_source", "fundamental_available_date", "entry_date",
+        "entry_price", "exit_date", "exit_price", "gross_return", "net_return",
+        "drop_threshold", "wait_days", "hold_days", "min_quality_percentile",
+        "require_stabilization",
+    ])
 
 
 def generate_trades(
@@ -146,73 +149,97 @@ def generate_trades(
     universe: pd.DataFrame | None = None,
     prepared: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Generate long-only quality mean-reversion trades without look-ahead.
+    """Generate trades with vectorized future-row joins.
 
-    `wait_days=0` means next-session open. If stabilization is required, the
-    next full session must close above the crash-day close (and not make a lower
-    low when low data exists), so the earliest entry moves to the following open.
+    `wait_days=0` means next-session open. Stabilization consumes the next full
+    session, so the earliest stabilized entry is the following session open.
     """
-    features = prepared.copy() if prepared is not None else prepare_features(prices, fundamentals, universe)
-    signals = features[
-        (features["daily_return"] <= cfg.drop_threshold)
+    features = prepared if prepared is not None else prepare_features(prices, fundamentals, universe)
+    if features.empty:
+        return _empty_trades()
+
+    quality = _quality_mask(features, cfg)
+    q_pct = pd.to_numeric(features.get("quality_percentile"), errors="coerce")
+    signal_mask = (
+        (pd.to_numeric(features["daily_return"], errors="coerce") <= cfg.drop_threshold)
         & features["in_universe"].fillna(False)
-    ].copy()
-    rows: list[dict] = []
+        & quality
+        & q_pct.notna()
+        & (q_pct >= cfg.min_quality_percentile)
+    )
+    signal_cols = ["ticker", "date", "daily_return", "quality_percentile", "close", "_ticker_row"]
+    if "low" in features.columns:
+        signal_cols.append("low")
+    if "fundamental_source" in features.columns:
+        signal_cols.append("fundamental_source")
+    if "available_date" in features.columns:
+        signal_cols.append("available_date")
+    signals = features.loc[signal_mask, signal_cols].copy()
+    if signals.empty:
+        return _empty_trades()
 
-    for sig in signals.itertuples(index=False):
-        latest_values = {c: getattr(sig, c, np.nan) for c in CORE_FUNDAMENTALS}
-        latest = pd.DataFrame([latest_values])
-        if not bool(_quality_mask(latest, cfg).iloc[0]):
-            continue
-        quality_percentile = float(getattr(sig, "quality_percentile", np.nan))
-        if not np.isfinite(quality_percentile) or quality_percentile < cfg.min_quality_percentile:
-            continue
+    signals = signals.rename(columns={
+        "date": "signal_date",
+        "daily_return": "signal_return",
+        "close": "signal_close",
+        "low": "signal_low",
+        "available_date": "fundamental_available_date",
+        "_ticker_row": "signal_i",
+    })
+    if "signal_low" not in signals.columns:
+        signals["signal_low"] = np.nan
+    if "fundamental_source" not in signals.columns:
+        signals["fundamental_source"] = "unknown"
+    if "fundamental_available_date" not in signals.columns:
+        signals["fundamental_available_date"] = pd.NaT
 
-        tp = features[features["ticker"] == sig.ticker].reset_index(drop=True)
-        positions = tp.index[tp["date"] == sig.date]
-        if len(positions) != 1:
-            continue
-        signal_i = int(positions[0])
-        earliest_entry = signal_i + 1
-
-        if cfg.require_stabilization:
-            confirm_i = signal_i + 1
-            if confirm_i >= len(tp):
-                continue
-            confirm = tp.iloc[confirm_i]
-            signal_row = tp.iloc[signal_i]
-            stabilized = float(confirm["close"]) > float(signal_row["close"])
-            if "low" in tp.columns and pd.notna(confirm.get("low")) and pd.notna(signal_row.get("low")):
-                stabilized = stabilized and float(confirm["low"]) >= float(signal_row["low"])
-            if not stabilized:
-                continue
-            earliest_entry = confirm_i + 1
-
-        entry_i = max(signal_i + cfg.wait_days + 1, earliest_entry)
-        exit_i = entry_i + cfg.hold_days
-        if exit_i >= len(tp):
-            continue
-        entry = tp.iloc[entry_i]
-        exit_ = tp.iloc[exit_i]
-        gross = float(exit_["close"] / entry["open"] - 1.0)
-        cost = cfg.round_trip_cost_bps / 10_000.0
-        rows.append({
-            "ticker": sig.ticker,
-            "signal_date": sig.date,
-            "signal_return": float(sig.daily_return),
-            "quality_percentile": quality_percentile,
-            "fundamental_source": getattr(sig, "fundamental_source", "unknown"),
-            "fundamental_available_date": getattr(sig, "available_date", pd.NaT),
-            "entry_date": entry["date"],
-            "entry_price": float(entry["open"]),
-            "exit_date": exit_["date"],
-            "exit_price": float(exit_["close"]),
-            "gross_return": gross,
-            "net_return": gross - cost,
-            "drop_threshold": cfg.drop_threshold,
-            "wait_days": cfg.wait_days,
-            "hold_days": cfg.hold_days,
-            "min_quality_percentile": cfg.min_quality_percentile,
-            "require_stabilization": cfg.require_stabilization,
+    if cfg.require_stabilization:
+        confirm_lookup = features[["ticker", "_ticker_row", "close"] + (["low"] if "low" in features.columns else [])].copy()
+        confirm_lookup = confirm_lookup.rename(columns={
+            "_ticker_row": "confirm_i",
+            "close": "confirm_close",
+            "low": "confirm_low",
         })
-    return pd.DataFrame(rows)
+        signals["confirm_i"] = signals["signal_i"] + 1
+        signals = signals.merge(confirm_lookup, on=["ticker", "confirm_i"], how="inner")
+        stabilized = signals["confirm_close"] > signals["signal_close"]
+        if "confirm_low" in signals.columns:
+            both_lows = signals["confirm_low"].notna() & signals["signal_low"].notna()
+            stabilized &= (~both_lows) | (signals["confirm_low"] >= signals["signal_low"])
+        signals = signals.loc[stabilized].copy()
+        if signals.empty:
+            return _empty_trades()
+
+    minimum_offset = 2 if cfg.require_stabilization else 1
+    entry_offset = max(cfg.wait_days + 1, minimum_offset)
+    signals["entry_i"] = signals["signal_i"] + entry_offset
+
+    entry_lookup = features[["ticker", "_ticker_row", "date", "open"]].rename(columns={
+        "_ticker_row": "entry_i",
+        "date": "entry_date",
+        "open": "entry_price",
+    })
+    signals = signals.merge(entry_lookup, on=["ticker", "entry_i"], how="inner")
+    if signals.empty:
+        return _empty_trades()
+
+    signals["exit_i"] = signals["entry_i"] + cfg.hold_days
+    exit_lookup = features[["ticker", "_ticker_row", "date", "close"]].rename(columns={
+        "_ticker_row": "exit_i",
+        "date": "exit_date",
+        "close": "exit_price",
+    })
+    signals = signals.merge(exit_lookup, on=["ticker", "exit_i"], how="inner")
+    if signals.empty:
+        return _empty_trades()
+
+    signals["gross_return"] = signals["exit_price"] / signals["entry_price"] - 1.0
+    signals["net_return"] = signals["gross_return"] - cfg.round_trip_cost_bps / 10_000.0
+    signals["drop_threshold"] = cfg.drop_threshold
+    signals["wait_days"] = cfg.wait_days
+    signals["hold_days"] = cfg.hold_days
+    signals["min_quality_percentile"] = cfg.min_quality_percentile
+    signals["require_stabilization"] = cfg.require_stabilization
+
+    columns = _empty_trades().columns.tolist()
+    return signals[columns].sort_values(["signal_date", "ticker"]).reset_index(drop=True)

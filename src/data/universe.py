@@ -5,7 +5,8 @@ import pandas as pd
 
 
 def normalize_ticker(value: object) -> str:
-    return str(value).strip().upper().replace("/", ".")
+    """Canonicalize common US share-class ticker separators."""
+    return str(value).strip().upper().replace("/", ".").replace("-", ".")
 
 
 def historical_components_to_intervals(history: pd.DataFrame) -> pd.DataFrame:
@@ -70,7 +71,11 @@ def load_universe_intervals(path: str | Path) -> pd.DataFrame:
 
 
 def attach_membership(frame: pd.DataFrame, intervals: pd.DataFrame | None, date_col: str = "date") -> pd.DataFrame:
-    """Attach an `in_universe` flag without expanding membership to daily rows."""
+    """Attach an `in_universe` flag without materializing a daily membership table.
+
+    Group indices are built once, so this stays practical for multi-million-row
+    FINSABER panels instead of rescanning the full frame for every ticker.
+    """
     out = frame.copy()
     if intervals is None or intervals.empty:
         out["in_universe"] = True
@@ -82,10 +87,13 @@ def attach_membership(frame: pd.DataFrame, intervals: pd.DataFrame | None, date_
     u["ticker"] = u["ticker"].map(normalize_ticker)
     u["start_date"] = pd.to_datetime(u["start_date"], errors="coerce")
     u["end_date"] = pd.to_datetime(u["end_date"], errors="coerce")
+
+    row_groups = out.groupby("ticker", sort=False).indices
     for ticker, spans in u.groupby("ticker", sort=False):
-        idx = out.index[out["ticker"] == ticker]
-        if len(idx) == 0:
+        idx = row_groups.get(ticker)
+        if idx is None or len(idx) == 0:
             continue
+        idx = pd.Index(idx)
         dates = out.loc[idx, date_col]
         member = pd.Series(False, index=idx)
         for span in spans.itertuples(index=False):

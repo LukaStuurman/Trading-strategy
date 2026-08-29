@@ -1,18 +1,11 @@
 #!/usr/bin/env python3
-"""Build research fundamentals from exact SEC Company Facts when available.
+"""Build causal quality fundamentals for the FINSABER research universe.
 
-GitHub-hosted runners are sometimes blocked by data.sec.gov. In that case this
-script falls back to Tenline, a public GitHub dataset derived from SEC filings.
-The Tenline fallback is intentionally conservative:
-
-- it uses annual observations only;
-- each observation is unavailable until at least period_end + 120 days; and
-- when provenance cites a later SEC accession year, availability is delayed to
-  December 31 of that accession year.
-
-This prevents a later comparative/restated filing from leaking backwards into
-an earlier backtest date. The fallback is therefore causal but deliberately
-stale, and is labelled as such in fundamentals_source.json.
+Exact SEC Company Facts remain preferred when a complete local raw set exists.
+Hosted CI normally falls back to Tenline, a GitHub-pinned SEC-derived annual
+snapshot. The fallback is deliberately conservative and its incomplete ticker
+coverage is recorded explicitly rather than interpreted as a failed quality
+screen.
 """
 from __future__ import annotations
 
@@ -27,9 +20,11 @@ import pandas as pd
 import requests
 
 from scripts.build_sec_fundamentals import build_one
+from src.data.io import read_table
+from src.data.universe import normalize_ticker
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PRICES = ROOT / "data" / "real" / "prices.csv"
+DEFAULT_PRICES = ROOT / "data" / "real" / "finsaber_prices.parquet"
 DEFAULT_SEC_DIR = ROOT / "data" / "real" / "raw" / "sec_companyfacts"
 DEFAULT_OUTPUT = ROOT / "data" / "real" / "fundamentals.csv"
 DEFAULT_AUDIT = ROOT / "data" / "real" / "fundamentals_audit.csv"
@@ -37,6 +32,7 @@ DEFAULT_SOURCE = ROOT / "data" / "real" / "fundamentals_source.json"
 TENLINE_REPO = "debjitmukherjee1/tenline"
 TENLINE_COMMIT_API = f"https://api.github.com/repos/{TENLINE_REPO}/commits/main"
 TENLINE_RAW = "https://raw.githubusercontent.com/{repo}/{sha}/site/data/companies/{ticker}.json"
+TENLINE_MANIFEST_RAW = "https://raw.githubusercontent.com/{repo}/{sha}/site/data/manifest.json"
 ACC_YEAR = re.compile(r"-(\d{2})-")
 
 
@@ -68,13 +64,25 @@ def conservative_available_date(record: dict) -> pd.Timestamp:
     return max(base, provenance_guard)
 
 
-def _price_asof(prices: pd.DataFrame, ticker: str, date: pd.Timestamp) -> float:
-    x = prices[(prices["ticker"] == ticker) & (prices["date"] <= date)]
-    if x.empty:
+def _build_price_groups(prices: pd.DataFrame, tickers: set[str]) -> dict[str, pd.DataFrame]:
+    subset = prices[prices["ticker"].isin(tickers)].copy()
+    columns = ["date", "close"] + (["raw_close"] if "raw_close" in subset.columns else [])
+    groups: dict[str, pd.DataFrame] = {}
+    for ticker, group in subset.groupby("ticker", sort=False):
+        groups[ticker] = group[columns].sort_values("date").reset_index(drop=True)
+    return groups
+
+
+def _price_asof(group: pd.DataFrame | None, date: pd.Timestamp) -> float:
+    if group is None or group.empty:
         return np.nan
-    row = x.iloc[-1]
-    col = "raw_close" if "raw_close" in x.columns and pd.notna(row.get("raw_close")) else "close"
-    return float(row[col])
+    pos = int(group["date"].searchsorted(date, side="right")) - 1
+    if pos < 0:
+        return np.nan
+    row = group.iloc[pos]
+    if "raw_close" in group.columns and pd.notna(row.get("raw_close")):
+        return float(row["raw_close"])
+    return float(row["close"])
 
 
 def _tenline_commit(session: requests.Session) -> str:
@@ -86,36 +94,70 @@ def _tenline_commit(session: requests.Session) -> str:
     return sha
 
 
-def _download_tenline_record(ticker: str, sha: str, session: requests.Session) -> dict:
-    url = TENLINE_RAW.format(repo=TENLINE_REPO, sha=sha, ticker=ticker)
+def _tenline_manifest(sha: str, session: requests.Session) -> dict:
+    url = TENLINE_MANIFEST_RAW.format(repo=TENLINE_REPO, sha=sha)
     r = session.get(url, timeout=60)
     r.raise_for_status()
-    payload = r.json()
-    if str(payload.get("ticker", "")).upper() != ticker:
-        raise RuntimeError(f"Tenline ticker mismatch for {ticker}")
-    return payload
+    return r.json()
 
 
-def build_from_tenline(prices: pd.DataFrame, tickers: Iterable[str], output: Path, audit_path: Path, source_path: Path) -> pd.DataFrame:
+def _tenline_ticker_map(manifest: dict) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for company in manifest.get("companies", []):
+        raw = str(company.get("ticker", "")).strip().upper()
+        years = int(company.get("years_covered") or 0)
+        if raw and years > 0:
+            mapping[normalize_ticker(raw)] = raw
+    return mapping
+
+
+def _download_tenline_record(upstream_ticker: str, sha: str, session: requests.Session) -> dict:
+    url = TENLINE_RAW.format(repo=TENLINE_REPO, sha=sha, ticker=upstream_ticker)
+    r = session.get(url, timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+
+def build_from_tenline(
+    prices: pd.DataFrame,
+    tickers: Iterable[str],
+    output: Path,
+    audit_path: Path,
+    source_path: Path,
+) -> pd.DataFrame:
     session = _session()
     sha = _tenline_commit(session)
+    manifest = _tenline_manifest(sha, session)
+    upstream_map = _tenline_ticker_map(manifest)
+    requested = sorted({normalize_ticker(t) for t in tickers})
+    available = [t for t in requested if t in upstream_map]
+    missing = sorted(set(requested) - set(available))
+    price_groups = _build_price_groups(prices, set(available))
+
     rows: list[dict] = []
     audits: list[dict] = []
     failed: dict[str, str] = {}
+    built_tickers: set[str] = set()
 
-    for ticker in tickers:
+    for ticker in available:
+        upstream_ticker = upstream_map[ticker]
         try:
-            payload = _download_tenline_record(ticker, sha, session)
+            payload = _download_tenline_record(upstream_ticker, sha, session)
         except Exception as exc:
             failed[ticker] = str(exc)
             print(f"[tenline] {ticker}: unavailable ({exc})")
             continue
+        payload_ticker = normalize_ticker(payload.get("ticker", upstream_ticker))
+        if payload_ticker != ticker:
+            failed[ticker] = f"ticker mismatch: {payload_ticker}"
+            continue
+
         count = 0
         for record in payload.get("years", []):
             if not record.get("period_end"):
                 continue
             available_date = conservative_available_date(record)
-            px = _price_asof(prices, ticker, available_date)
+            px = _price_asof(price_groups.get(ticker), available_date)
             shares = pd.to_numeric(pd.Series([record.get("diluted_shares")]), errors="coerce").iloc[0]
             market_cap = float(shares * px) if np.isfinite(shares) and shares > 0 and np.isfinite(px) else np.nan
             fcf = pd.to_numeric(pd.Series([record.get("fcf")]), errors="coerce").iloc[0]
@@ -142,6 +184,8 @@ def build_from_tenline(prices: pd.DataFrame, tickers: Iterable[str], output: Pat
                 "source_accession_year_max": max(source_years) if source_years else np.nan,
             })
             count += 1
+        if count:
+            built_tickers.add(ticker)
         audits.append({
             "ticker": ticker,
             "metric": "source",
@@ -159,30 +203,51 @@ def build_from_tenline(prices: pd.DataFrame, tickers: Iterable[str], output: Pat
     output.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(output, index=False)
     pd.DataFrame(audits).to_csv(audit_path, index=False)
+
+    all_missing = sorted(set(missing) | set(failed))
     source = {
         "mode": "tenline_sec_annual_conservative",
         "upstream_repo": TENLINE_REPO,
         "upstream_commit": sha,
+        "upstream_universe_as_of": manifest.get("universe_as_of"),
+        "upstream_updated_at": manifest.get("updated_at"),
         "availability_rule": "max(period_end + 120 days, December 31 of latest SEC accession year referenced by provenance)",
-        "reason": "Exact data.sec.gov Company Facts unavailable from the GitHub-hosted runner",
+        "reason": "Exact Company Facts were not present locally; hosted SEC access is not required for this fallback",
+        "requested_price_tickers": len(requested),
+        "upstream_available_tickers": len(available),
+        "built_tickers": len(built_tickers),
+        "ticker_coverage": len(built_tickers) / len(requested) if requested else 0.0,
+        "missing_tickers": all_missing,
+        "failed_tickers": failed,
         "limitations": [
+            "Tenline currently covers its own S&P universe rather than every historical/delisted FINSABER symbol",
             "annual rather than quarterly fundamentals",
             "availability deliberately delayed to avoid comparative/restatement look-ahead",
             "current ratio and gross debt/equity are unavailable in Tenline output",
             "market cap uses diluted shares times historical unadjusted/raw close where available",
         ],
-        "failed_tickers": failed,
     }
     source_path.write_text(json.dumps(source, indent=2), encoding="utf-8")
     return result
 
 
-def build_from_sec(prices: pd.DataFrame, sec_dir: Path, tickers: list[str], output: Path, audit_path: Path, source_path: Path) -> pd.DataFrame:
+def build_from_sec(
+    prices: pd.DataFrame,
+    sec_dir: Path,
+    tickers: list[str],
+    output: Path,
+    audit_path: Path,
+    source_path: Path,
+) -> pd.DataFrame:
     all_rows, audits = [], []
     for ticker in tickers:
-        path = sec_dir / f"{ticker}.json"
+        candidates = [sec_dir / f"{ticker}.json", sec_dir / f"{ticker.replace('.', '-')}.json"]
+        path = next((p for p in candidates if p.exists()), None)
+        if path is None:
+            raise FileNotFoundError(f"Missing exact SEC Company Facts for {ticker}")
         payload = json.loads(path.read_text(encoding="utf-8"))
-        rows, audit = build_one(ticker, payload, prices)
+        ticker_prices = prices[prices["ticker"] == ticker]
+        rows, audit = build_one(ticker, payload, ticker_prices)
         if not rows.empty:
             rows["fundamental_source"] = "sec_companyfacts_exact_filing_date"
             all_rows.append(rows)
@@ -196,6 +261,7 @@ def build_from_sec(prices: pd.DataFrame, sec_dir: Path, tickers: list[str], outp
         "mode": "sec_companyfacts_exact_filing_date",
         "availability_rule": "SEC filed date",
         "tickers": tickers,
+        "ticker_coverage": 1.0,
     }, indent=2), encoding="utf-8")
     return result
 
@@ -209,15 +275,18 @@ def main() -> None:
     p.add_argument("--source", default=str(DEFAULT_SOURCE))
     args = p.parse_args()
 
-    prices = pd.read_csv(args.prices)
-    prices["date"] = pd.to_datetime(prices["date"])
-    prices["ticker"] = prices["ticker"].astype(str).str.upper()
-    prices = prices.sort_values(["ticker", "date"])
+    prices = read_table(args.prices)
+    prices["date"] = pd.to_datetime(prices["date"], errors="coerce")
+    prices["ticker"] = prices["ticker"].map(normalize_ticker)
+    prices = prices.dropna(subset=["date"]).sort_values(["ticker", "date"])
     tickers = sorted(prices["ticker"].dropna().unique().tolist())
     sec_dir = Path(args.sec_dir)
     output, audit_path, source_path = Path(args.output), Path(args.audit), Path(args.source)
-    have_exact_sec = all((sec_dir / f"{ticker}.json").exists() for ticker in tickers)
 
+    def exact_path_exists(ticker: str) -> bool:
+        return (sec_dir / f"{ticker}.json").exists() or (sec_dir / f"{ticker.replace('.', '-')}.json").exists()
+
+    have_exact_sec = bool(tickers) and all(exact_path_exists(ticker) for ticker in tickers)
     if have_exact_sec:
         result = build_from_sec(prices, sec_dir, tickers, output, audit_path, source_path)
     else:
