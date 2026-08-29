@@ -162,7 +162,7 @@ python scripts/download_finsaber_prices.py \
 python scripts/download_sp500_membership.py
 
 python scripts/build_universe.py \
-  --history data/real/raw/sp500_historical_components.csv \
+  --history data/real/raw/sp_500_historical_components.csv \
   --output data/real/universe_intervals.csv
 
 python scripts/validate_research_data.py \
