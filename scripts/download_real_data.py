@@ -2,7 +2,11 @@
 """Download reproducible public historical data.
 
 Daily OHLCV uses Stooq first and a split/dividend-adjusted Yahoo chart fallback.
-SEC Company Facts are stored raw so downstream features can use filing dates.
+The Yahoo path also preserves `raw_close` so historical market-cap calculations
+can pair as-reported share counts with an unadjusted price.
+
+SEC Company Facts are attempted directly. `--sec-soft-fail` lets a downstream
+reproducible fallback take over when data.sec.gov blocks a hosted runner.
 """
 from __future__ import annotations
 
@@ -37,7 +41,7 @@ STARTER_CIKS = {
 def http_session() -> requests.Session:
     s = requests.Session()
     s.headers.update({
-        "User-Agent": os.environ.get("SEC_USER_AGENT", "Trading-strategy research https://github.com/LukaStuurman/Trading-strategy"),
+        "User-Agent": os.environ.get("SEC_USER_AGENT", "Trading-strategy research 32568576+LukaStuurman@users.noreply.github.com"),
         "Accept-Encoding": "gzip, deflate",
     })
     return s
@@ -85,6 +89,8 @@ def _stooq_prices(ticker: str, start: str, end: str, session: requests.Session) 
     except Exception:
         return pd.DataFrame()
     df.columns = [str(c).lower() for c in df.columns]
+    if "close" in df.columns:
+        df["raw_close"] = df["close"]
     return df
 
 
@@ -111,13 +117,17 @@ def _yahoo_prices(ticker: str, start: str, end: str, session: requests.Session) 
     raw_close = pd.to_numeric(pd.Series(quotes.get("close", [None] * n)), errors="coerce")
     adj_close = pd.to_numeric(pd.Series(adj if len(adj) == n else quotes.get("close", [None] * n)), errors="coerce")
     factor = (adj_close / raw_close).replace([np.inf, -np.inf], np.nan).fillna(1.0)
-    data = {"date": pd.to_datetime(ts, unit="s", utc=True).date, "volume": quotes.get("volume", [None] * n)}
+    data = {
+        "date": pd.to_datetime(ts, unit="s", utc=True).date,
+        "volume": quotes.get("volume", [None] * n),
+        "raw_close": raw_close,
+    }
     for col in ["open", "high", "low"]:
         raw = pd.to_numeric(pd.Series(quotes.get(col, [None] * n)), errors="coerce")
         data[col] = raw * factor
     data["close"] = adj_close
-    df = pd.DataFrame(data)[["date", "open", "high", "low", "close", "volume"]]
-    return df.dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
+    df = pd.DataFrame(data)[["date", "open", "high", "low", "close", "volume", "raw_close"]]
+    return df.dropna(subset=["open", "high", "low", "close", "raw_close"]).reset_index(drop=True)
 
 
 def download_prices(tickers: Iterable[str], start: str, end: str, session: requests.Session) -> pd.DataFrame:
@@ -131,10 +141,12 @@ def download_prices(tickers: Iterable[str], start: str, end: str, session: reque
         if not _valid_price_frame(df, start, end):
             print(f"[prices] Stooq invalid for {ticker} ({len(df)} rows); trying adjusted Yahoo")
             df = _yahoo_prices(ticker, start, end, session)
-            source = "Yahoo chart API adjusted OHLC"
+            source = "Yahoo chart API adjusted OHLC + raw_close"
         if not _valid_price_frame(df, start, end):
             raise RuntimeError(f"No valid historical price series for {ticker}; got {len(df)} rows")
-        df = df[["date", "open", "high", "low", "close", "volume"]].copy()
+        if "raw_close" not in df.columns:
+            df["raw_close"] = df["close"]
+        df = df[["date", "open", "high", "low", "close", "volume", "raw_close"]].copy()
         df.insert(0, "ticker", ticker)
         df.to_csv(PRICES_DIR / f"{ticker}.csv", index=False)
         frames.append(df)
@@ -168,12 +180,15 @@ def sec_ticker_map() -> dict[str, int]:
     return mapping
 
 
-def download_sec_companyfacts(tickers: Iterable[str], session: requests.Session) -> None:
+def download_sec_companyfacts(tickers: Iterable[str], session: requests.Session, *, soft_fail: bool = False) -> dict:
     mapping = sec_ticker_map()
+    downloaded: list[str] = []
+    failures: dict[str, str] = {}
     for raw_ticker in tickers:
         ticker = raw_ticker.strip().upper()
         cik = mapping.get(ticker)
         if cik is None:
+            failures[ticker] = "no CIK mapping"
             print(f"[sec] no CIK mapping: {ticker}")
             continue
         url = SEC_FACTS.format(cik=cik)
@@ -190,14 +205,24 @@ def download_sec_companyfacts(tickers: Iterable[str], session: requests.Session)
                 }
                 (SEC_DIR / f"{ticker}.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
                 print(f"[sec] {ticker} CIK {cik}")
+                downloaded.append(ticker)
                 last_error = None
                 break
             except requests.RequestException as exc:
                 last_error = exc
                 time.sleep(1.0 + attempt)
         if last_error is not None:
+            failures[ticker] = str(last_error)
+            if soft_fail:
+                print(f"[sec] soft failure for {ticker}: {last_error}; downstream fallback will be used")
+                # A 403 from the first well-formed request is normally an egress/IP
+                # block. Avoid hammering the endpoint for the remaining tickers.
+                if getattr(getattr(last_error, "response", None), "status_code", None) == 403:
+                    break
+                continue
             raise RuntimeError(f"SEC Company Facts failed for {ticker}: {last_error}")
         time.sleep(0.25)
+    return {"downloaded": downloaded, "failures": failures, "complete": not failures and len(downloaded) > 0}
 
 
 def parse_args() -> argparse.Namespace:
@@ -208,6 +233,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--skip-prices", action="store_true")
     p.add_argument("--skip-sec", action="store_true")
     p.add_argument("--skip-sp500", action="store_true")
+    p.add_argument("--sec-soft-fail", action="store_true", help="Continue when SEC blocks hosted runner; fundamentals builder will use a labelled fallback")
     return p.parse_args()
 
 
@@ -220,16 +246,19 @@ def main() -> None:
         download_sp500_history(session)
     if not args.skip_prices:
         download_prices(tickers, args.start, args.end, session)
+    sec_status = {"skipped": True}
     if not args.skip_sec:
-        download_sec_companyfacts(tickers, session)
+        sec_status = download_sec_companyfacts(tickers, session, soft_fail=args.sec_soft_fail)
     manifest = {
         "tickers": tickers, "start": args.start, "end": args.end,
         "sources": {
-            "prices": "Stooq with adjusted Yahoo chart fallback; see price_sources.json",
+            "prices": "Stooq with adjusted Yahoo chart fallback; raw_close retained for market-cap alignment",
             "sp500_membership": "hanshof/sp500_constituents",
-            "fundamentals": "SEC EDGAR Company Facts",
+            "fundamentals_primary": "SEC EDGAR Company Facts",
+            "fundamentals_fallback": "debjitmukherjee1/tenline pinned GitHub commit, conservative annual availability",
             "earnings_sample": "pingfcc99/Earnings-surprise-on-stock-price Bloomberg-derived 2016 sample",
         },
+        "sec_download": sec_status,
     }
     (REAL / "download_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print("Done. Data written under data/real/.")
