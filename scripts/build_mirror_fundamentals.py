@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build point-in-time quality fundamentals from compact SEC mirror facts.
 
-Unlike the older annual fallback, this builder uses raw Company Facts rows and
-their SEC `filed` timestamps. Candidate taxonomy tags are selected per context,
-so issuers can change tags through time without losing older history.
+The builder uses raw Company Facts rows and their SEC `filed` timestamps.  The
+implementation keeps one incremental context state per metric and evaluates it
+only when that metric changes.  This preserves point-in-time semantics while
+avoiding repeated DataFrame filtering for every metric x filing-date pair.
 """
 from __future__ import annotations
 
@@ -15,6 +16,8 @@ import numpy as np
 import pandas as pd
 
 from scripts.build_sec_fundamentals import TAGS, FLOW_KEYS
+from src.data.io import read_table
+from src.data.universe import normalize_ticker
 
 MIRROR_TAGS = {
     **TAGS,
@@ -25,8 +28,6 @@ MIRROR_TAGS = {
     "income_tax": ["IncomeTaxExpenseBenefit"],
 }
 MIRROR_FLOW_KEYS = set(FLOW_KEYS) | {"pretax_income", "income_tax"}
-from src.data.io import read_table
-from src.data.universe import normalize_ticker
 
 
 def normalize_cik(value) -> str | None:
@@ -46,115 +47,170 @@ def normalize_cik(value) -> str | None:
 
 
 def _metric_frame(facts: pd.DataFrame, candidates: list[str], flow: bool) -> pd.DataFrame:
-    columns = ["filed", "start", "end", "val", "form", "fp", "fy", "tag", "accn"]
     x = facts[facts["tag"].isin(candidates)].copy()
     if x.empty:
-        return pd.DataFrame(columns=columns + (["duration"] if flow else []))
+        cols = ["filed", "start", "end", "val", "form", "fp", "fy", "tag", "accn", "priority"]
+        return pd.DataFrame(columns=cols + (["duration"] if flow else []))
     priority = {tag: i for i, tag in enumerate(candidates)}
-    x["priority"] = x["tag"].map(priority).fillna(len(priority)).astype(int)
+    x["priority"] = x["tag"].map(priority).fillna(len(priority)).astype("int16")
     for col in ["filed", "start", "end"]:
-        x[col] = pd.to_datetime(x[col], errors="coerce")
+        x[col] = pd.to_datetime(x.get(col), errors="coerce")
     x["val"] = pd.to_numeric(x["val"], errors="coerce")
     x = x.dropna(subset=["filed", "end", "val"])
+    # A fact should not describe a period materially after it was filed.  Seven
+    # days permits benign timestamp/calendar differences without future leakage.
     x = x[x["end"] <= x["filed"] + pd.Timedelta(days=7)]
     if flow:
         x = x.dropna(subset=["start"])
         x["duration"] = (x["end"] - x["start"]).dt.days
         x = x[x["duration"].between(45, 420, inclusive="both")]
-    context_cols = ["filed", "start", "end"] if flow else ["filed", "end"]
+        context_cols = ["filed", "start", "end"]
+    else:
+        context_cols = ["filed", "end"]
+    # Select the preferred taxonomy tag per identical filing context, but allow
+    # a later filing to restate that same context.
     x = x.sort_values(context_cols + ["priority"]).drop_duplicates(context_cols, keep="first")
     return x.sort_values(["filed", "end", "priority"]).reset_index(drop=True)
 
 
-def _latest_contexts_asof(frame: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame:
-    if frame.empty:
-        return frame
-    x = frame[frame["filed"] <= date].copy()
-    if x.empty:
-        return x
-    context_cols = ["start", "end"] if "duration" in x.columns else ["end"]
-    x = x.sort_values(["filed", "priority"], ascending=[True, False]).drop_duplicates(context_cols, keep="last")
-    return x.sort_values("end").reset_index(drop=True)
-
-
-def _instant_asof(frame: pd.DataFrame, date: pd.Timestamp) -> float:
-    x = _latest_contexts_asof(frame, date)
-    if x.empty:
+def _flow_snapshot(state: dict[tuple[pd.Timestamp, pd.Timestamp], tuple[int, int, float]], date: pd.Timestamp) -> float:
+    """Return TTM flow from the current set of filed contexts."""
+    if not state:
         return np.nan
-    latest_end = x["end"].max()
-    row = x[x["end"] == latest_end].sort_values("priority").iloc[0]
-    return float(row["val"])
-
-
-def _average_balance_asof(frame: pd.DataFrame, date: pd.Timestamp) -> float:
-    x = _latest_contexts_asof(frame, date)
-    if x.empty:
-        return np.nan
-    x = x.sort_values("end").drop_duplicates("end", keep="last")
-    latest = x.iloc[-1]
-    prior = x[x["end"] <= latest["end"] - pd.Timedelta(days=180)]
-    if prior.empty:
-        return float(latest["val"])
-    return float(np.nanmean([float(prior.iloc[-1]["val"]), float(latest["val"])]))
-
-
-def _quarter_values(frame: pd.DataFrame, date: pd.Timestamp) -> list[tuple[pd.Timestamp, float]]:
-    x = _latest_contexts_asof(frame, date)
-    if x.empty:
-        return []
 
     quarters: dict[pd.Timestamp, tuple[int, float]] = {}
-    direct = x[x["duration"].between(65, 115, inclusive="both")]
-    for _, row in direct.iterrows():
-        end = pd.Timestamp(row["end"])
-        priority = int(row["priority"])
-        current = quarters.get(end)
-        if current is None or priority < current[0]:
-            quarters[end] = (priority, float(row["val"]))
+    by_start: dict[pd.Timestamp, list[tuple[pd.Timestamp, int, int, float]]] = {}
+    annual: list[tuple[pd.Timestamp, int, float]] = []
 
-    cumulative = x[x["duration"].between(65, 400, inclusive="both")].copy()
-    for _, group in cumulative.groupby("start", sort=False):
-        g = group.sort_values(["duration", "priority"]).drop_duplicates("duration", keep="first")
-        rows = list(g.itertuples(index=False))
-        for prev, curr in zip(rows, rows[1:]):
-            prev_duration = float(prev.duration)
-            curr_duration = float(curr.duration)
-            increment = curr_duration - prev_duration
-            if 55 <= increment <= 120 and curr_duration <= 400:
-                end = pd.Timestamp(curr.end)
-                derived = float(curr.val) - float(prev.val)
-                quarters.setdefault(end, (10_000 + int(curr.priority), derived))
+    for (start, end), (duration, priority, value) in state.items():
+        if 65 <= duration <= 115:
+            cur = quarters.get(end)
+            if cur is None or priority < cur[0]:
+                quarters[end] = (priority, value)
+        if 65 <= duration <= 400:
+            by_start.setdefault(start, []).append((end, duration, priority, value))
+        if 300 <= duration <= 400:
+            annual.append((end, priority, value))
 
-    return [(end, val[1]) for end, val in sorted(quarters.items()) if np.isfinite(val[1])]
+    # SEC cash-flow and income facts are frequently YTD.  Consecutive contexts
+    # with the same start date can be differenced into standalone quarters,
+    # including Q4 = FY - Q3 YTD.
+    for group in by_start.values():
+        group.sort(key=lambda row: (row[1], row[2], row[0]))
+        by_duration: dict[int, tuple[pd.Timestamp, int, int, float]] = {}
+        for row in group:
+            duration = row[1]
+            existing = by_duration.get(duration)
+            if existing is None or row[2] < existing[2]:
+                by_duration[duration] = row
+        ordered = [by_duration[d] for d in sorted(by_duration)]
+        for prev, curr in zip(ordered, ordered[1:]):
+            increment = curr[1] - prev[1]
+            if 55 <= increment <= 120:
+                end = curr[0]
+                derived = curr[3] - prev[3]
+                if np.isfinite(derived) and end not in quarters:
+                    quarters[end] = (10_000 + curr[2], float(derived))
 
-
-def _ttm_flow_asof(frame: pd.DataFrame, date: pd.Timestamp) -> float:
-    quarters = _quarter_values(frame, date)
-    if len(quarters) >= 4:
-        last4 = quarters[-4:]
+    quarter_rows = [(end, value[1]) for end, value in sorted(quarters.items()) if np.isfinite(value[1])]
+    if len(quarter_rows) >= 4:
+        last4 = quarter_rows[-4:]
         if (last4[-1][0] - last4[0][0]).days <= 380:
             return float(sum(v for _, v in last4))
 
-    x = _latest_contexts_asof(frame, date)
-    annual = x[x["duration"].between(300, 400, inclusive="both")]
-    if annual.empty:
+    if not annual:
         return np.nan
-    row = annual.sort_values(["end", "priority"]).iloc[-1]
-    if (date - pd.Timestamp(row["end"])).days > 550:
+    annual.sort(key=lambda row: (row[0], -row[1]))
+    end, _priority, value = annual[-1]
+    if (date - end).days > 550:
         return np.nan
-    return float(row["val"])
+    return float(value)
 
 
-def _raw_price_asof(group: pd.DataFrame, date: pd.Timestamp) -> float:
-    if group.empty:
-        return np.nan
-    pos = int(group["date"].searchsorted(date, side="right")) - 1
-    if pos < 0:
-        return np.nan
-    row = group.iloc[pos]
-    if "raw_close" in group.columns and pd.notna(row.get("raw_close")):
-        return float(row["raw_close"])
-    return float(row["close"])
+def _flow_series(frame: pd.DataFrame) -> pd.Series:
+    if frame.empty:
+        return pd.Series(dtype=float)
+    state: dict[tuple[pd.Timestamp, pd.Timestamp], tuple[int, int, float]] = {}
+    out: dict[pd.Timestamp, float] = {}
+    for filed, group in frame.groupby("filed", sort=True):
+        filed = pd.Timestamp(filed)
+        for row in group.itertuples(index=False):
+            key = (pd.Timestamp(row.start), pd.Timestamp(row.end))
+            state[key] = (int(row.duration), int(row.priority), float(row.val))
+        out[filed] = _flow_snapshot(state, filed)
+    return pd.Series(out, dtype=float).sort_index()
+
+
+def _instant_series(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Return latest and average-balance series at each filing event."""
+    if frame.empty:
+        empty = pd.Series(dtype=float)
+        return empty, empty
+    state: dict[pd.Timestamp, tuple[int, float]] = {}
+    latest_out: dict[pd.Timestamp, float] = {}
+    average_out: dict[pd.Timestamp, float] = {}
+    for filed, group in frame.groupby("filed", sort=True):
+        filed = pd.Timestamp(filed)
+        for row in group.itertuples(index=False):
+            end = pd.Timestamp(row.end)
+            candidate = (int(row.priority), float(row.val))
+            current = state.get(end)
+            if current is None or candidate[0] <= current[0]:
+                state[end] = candidate
+        if not state:
+            continue
+        latest_end = max(state)
+        latest_val = state[latest_end][1]
+        latest_out[filed] = latest_val
+        prior_ends = [end for end in state if end <= latest_end - pd.Timedelta(days=180)]
+        if prior_ends:
+            prior_val = state[max(prior_ends)][1]
+            average_out[filed] = float(np.nanmean([prior_val, latest_val]))
+        else:
+            average_out[filed] = latest_val
+    return (
+        pd.Series(latest_out, dtype=float).sort_index(),
+        pd.Series(average_out, dtype=float).sort_index(),
+    )
+
+
+def _asof_series(series: pd.Series, dates: pd.DatetimeIndex) -> pd.Series:
+    if series.empty:
+        return pd.Series(np.nan, index=dates, dtype=float)
+    return series.reindex(series.index.union(dates)).sort_index().ffill().reindex(dates).astype(float)
+
+
+def _safe_div(num: pd.Series, den: pd.Series, *, positive_den: bool = True) -> pd.Series:
+    n = pd.to_numeric(num, errors="coerce")
+    d = pd.to_numeric(den, errors="coerce")
+    valid = n.notna() & d.notna()
+    valid &= d.gt(0) if positive_den else d.abs().gt(1e-12)
+    out = pd.Series(np.nan, index=n.index, dtype=float)
+    out.loc[valid] = n.loc[valid] / d.loc[valid]
+    return out
+
+
+def _price_series_asof(pg: pd.DataFrame, dates: pd.DatetimeIndex) -> pd.Series:
+    price_col = "raw_close" if "raw_close" in pg.columns else "close"
+    right = pg[["date", price_col]].copy().sort_values("date")
+    right[price_col] = pd.to_numeric(right[price_col], errors="coerce")
+    left = pd.DataFrame({"available_date": dates})
+    merged = pd.merge_asof(
+        left,
+        right,
+        left_on="available_date",
+        right_on="date",
+        direction="backward",
+        allow_exact_matches=True,
+    )
+    return pd.Series(merged[price_col].to_numpy(), index=dates, dtype=float)
+
+
+def _join_unique(values: pd.Series, limit: int | None = None) -> str:
+    items = sorted({str(v) for v in values.dropna() if str(v)})
+    if limit is not None:
+        items = items[:limit]
+    return ",".join(items)
 
 
 def build_from_mirror_facts(prices: pd.DataFrame, facts: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
@@ -166,27 +222,27 @@ def build_from_mirror_facts(prices: pd.DataFrame, facts: pd.DataFrame) -> tuple[
 
     f = facts.copy()
     f["cik"] = f["cik"].map(normalize_cik)
-    f["filed"] = pd.to_datetime(f["filed"], errors="coerce")
-    f["start"] = pd.to_datetime(f.get("start"), errors="coerce")
-    f["end"] = pd.to_datetime(f["end"], errors="coerce")
+    for col in ["filed", "start", "end"]:
+        f[col] = pd.to_datetime(f.get(col), errors="coerce")
     f["val"] = pd.to_numeric(f["val"], errors="coerce")
     f = f.dropna(subset=["cik", "filed", "end", "tag", "val"])
 
-    facts_by_cik = {cik: g.copy() for cik, g in f.groupby("cik", sort=False)}
-    rows: list[dict] = []
+    facts_by_cik = {cik: g for cik, g in f.groupby("cik", sort=False)}
+    rows: list[pd.DataFrame] = []
     audits: list[dict] = []
     built_tickers: set[str] = set()
     built_ciks: set[str] = set()
     multi_cik = p[["ticker", "cik"]].drop_duplicates().groupby("ticker")["cik"].nunique()
     multi_cik_tickers = sorted(multi_cik[multi_cik > 1].index.tolist())
 
-    for (ticker, cik), pg in p.groupby(["ticker", "cik"], sort=False):
+    pairs = list(p.groupby(["ticker", "cik"], sort=False))
+    for pair_i, ((ticker, cik), pg) in enumerate(pairs, start=1):
         cf = facts_by_cik.get(cik)
         if cf is None or cf.empty:
             continue
         pg = pg.sort_values("date").reset_index(drop=True)
-        pair_start = pg["date"].min()
-        pair_end = pg["date"].max()
+        pair_start = pd.Timestamp(pg["date"].min())
+        pair_end = pd.Timestamp(pg["date"].max())
         cf = cf[
             (cf["filed"] >= pair_start - pd.Timedelta(days=550))
             & (cf["filed"] <= pair_end + pd.Timedelta(days=7))
@@ -198,85 +254,74 @@ def build_from_mirror_facts(prices: pd.DataFrame, facts: pd.DataFrame) -> tuple[
             key: _metric_frame(cf, candidates, flow=key in MIRROR_FLOW_KEYS)
             for key, candidates in MIRROR_TAGS.items()
         }
-        filed_dates = sorted(cf["filed"].dropna().unique().tolist())
-        pair_count = 0
-        for available_raw in filed_dates:
-            available_date = pd.Timestamp(available_raw)
-            if available_date > pair_end + pd.Timedelta(days=7):
-                continue
+        dates = pd.DatetimeIndex(sorted(pd.to_datetime(cf["filed"].dropna().unique())))
+        if dates.empty:
+            continue
+        state = pd.DataFrame(index=dates)
 
-            revenue = _ttm_flow_asof(frames["revenue"], available_date)
-            net_income = _ttm_flow_asof(frames["net_income"], available_date)
-            operating_income = _ttm_flow_asof(frames["operating_income"], available_date)
-            cfo = _ttm_flow_asof(frames["cfo"], available_date)
-            capex = _ttm_flow_asof(frames["capex"], available_date)
-            pretax_income = _ttm_flow_asof(frames["pretax_income"], available_date)
-            income_tax = _ttm_flow_asof(frames["income_tax"], available_date)
+        for key in MIRROR_FLOW_KEYS:
+            state[key] = _asof_series(_flow_series(frames[key]), dates)
+        for key in set(MIRROR_TAGS) - MIRROR_FLOW_KEYS:
+            latest, average = _instant_series(frames[key])
+            state[key] = _asof_series(latest, dates)
+            if key in {"equity", "assets"}:
+                state[f"avg_{key}"] = _asof_series(average, dates)
 
-            equity = _instant_asof(frames["equity"], available_date)
-            avg_equity = _average_balance_asof(frames["equity"], available_date)
-            assets = _instant_asof(frames["assets"], available_date)
-            avg_assets = _average_balance_asof(frames["assets"], available_date)
-            ca = _instant_asof(frames["assets_current"], available_date)
-            cl = _instant_asof(frames["liabilities_current"], available_date)
-            cash = _instant_asof(frames["cash"], available_date)
-            debt_short = _instant_asof(frames["debt"], available_date)
-            debt_long = _instant_asof(frames["debt_long"], available_date)
-            shares = _instant_asof(frames["shares"], available_date)
+        debt = pd.concat([state["debt"], state["debt_long"]], axis=1).sum(axis=1, min_count=1)
+        fcf = state["cfo"] - state["capex"]
+        state["roe"] = _safe_div(state["net_income"], state["avg_equity"])
+        state["roa"] = _safe_div(state["net_income"], state["avg_assets"])
+        state["operating_margin"] = _safe_div(state["operating_income"], state["revenue"])
+        state["fcf_margin"] = _safe_div(fcf, state["revenue"])
+        state["fcf_to_net_income"] = _safe_div(fcf, state["net_income"], positive_den=False)
+        state["asset_turnover"] = _safe_div(state["revenue"], state["avg_assets"])
+        state["debt_to_equity"] = _safe_div(debt, state["equity"])
+        net_debt = debt - state["cash"]
+        state["net_debt_to_equity"] = _safe_div(net_debt, state["equity"])
+        state["current_ratio"] = _safe_div(state["assets_current"], state["liabilities_current"])
 
-            debt_parts = [v for v in [debt_short, debt_long] if np.isfinite(v)]
-            debt_total = float(sum(debt_parts)) if debt_parts else np.nan
-            roe = net_income / avg_equity if np.isfinite(net_income) and np.isfinite(avg_equity) and avg_equity > 0 else np.nan
-            roa = net_income / avg_assets if np.isfinite(net_income) and np.isfinite(avg_assets) and avg_assets > 0 else np.nan
-            operating_margin = operating_income / revenue if np.isfinite(operating_income) and np.isfinite(revenue) and revenue > 0 else np.nan
-            fcf = cfo - capex if np.isfinite(cfo) and np.isfinite(capex) else np.nan
-            fcf_margin = fcf / revenue if np.isfinite(fcf) and np.isfinite(revenue) and revenue > 0 else np.nan
-            fcf_to_ni = fcf / net_income if np.isfinite(fcf) and np.isfinite(net_income) and abs(net_income) > 1e-12 else np.nan
-            asset_turnover = revenue / avg_assets if np.isfinite(revenue) and np.isfinite(avg_assets) and avg_assets > 0 else np.nan
-            debt_to_equity = debt_total / equity if np.isfinite(debt_total) and np.isfinite(equity) and equity > 0 else np.nan
-            net_debt = debt_total - cash if np.isfinite(debt_total) and np.isfinite(cash) else np.nan
-            net_debt_to_equity = net_debt / equity if np.isfinite(net_debt) and np.isfinite(equity) and equity > 0 else np.nan
-            current_ratio = ca / cl if np.isfinite(ca) and np.isfinite(cl) and cl > 0 else np.nan
-            px = _raw_price_asof(pg, available_date)
-            market_cap = shares * px if np.isfinite(shares) and shares > 0 and np.isfinite(px) else np.nan
+        price = _price_series_asof(pg, dates)
+        market_cap = state["shares"] * price
+        market_cap[(state["shares"] <= 0) | state["shares"].isna() | price.isna()] = np.nan
+        state["market_cap"] = market_cap
 
-            tax_rate = income_tax / pretax_income if np.isfinite(income_tax) and np.isfinite(pretax_income) and pretax_income > 0 else np.nan
-            if np.isfinite(tax_rate):
-                tax_rate = float(np.clip(tax_rate, 0.0, 0.40))
-            invested_capital = equity + debt_total - cash if np.isfinite(equity) and np.isfinite(debt_total) and np.isfinite(cash) else np.nan
-            nopat = operating_income * (1.0 - tax_rate) if np.isfinite(operating_income) and np.isfinite(tax_rate) else np.nan
-            roic = nopat / invested_capital if np.isfinite(nopat) and np.isfinite(invested_capital) and invested_capital > 0 else np.nan
+        tax_rate = _safe_div(state["income_tax"], state["pretax_income"]).clip(lower=0.0, upper=0.40)
+        invested_capital = state["equity"] + debt - state["cash"]
+        nopat = state["operating_income"] * (1.0 - tax_rate)
+        state["roic"] = _safe_div(nopat, invested_capital)
 
-            if not any(np.isfinite(v) for v in [roe, fcf_margin, debt_to_equity, net_debt_to_equity, market_cap]):
-                continue
-            filing_rows = cf[cf["filed"] == available_date]
-            accessions = sorted({str(v) for v in filing_rows.get("accn", pd.Series(dtype=str)).dropna() if str(v)})
-            forms = sorted({str(v) for v in filing_rows.get("form", pd.Series(dtype=str)).dropna() if str(v)})
+        provenance_cols = {"source_forms": pd.Series("", index=dates), "source_accessions": pd.Series("", index=dates)}
+        if "form" in cf.columns:
+            provenance_cols["source_forms"] = cf.groupby("filed")["form"].apply(_join_unique).reindex(dates).fillna("")
+        if "accn" in cf.columns:
+            provenance_cols["source_accessions"] = cf.groupby("filed")["accn"].apply(lambda s: _join_unique(s, 5)).reindex(dates).fillna("")
 
-            rows.append({
-                "ticker": ticker,
-                "cik": cik,
-                "available_date": available_date.date().isoformat(),
-                "roe": roe,
-                "roic": roic,
-                "roa": roa,
-                "operating_margin": operating_margin,
-                "fcf_margin": fcf_margin,
-                "fcf_to_net_income": fcf_to_ni,
-                "asset_turnover": asset_turnover,
-                "debt_to_equity": debt_to_equity,
-                "net_debt_to_equity": net_debt_to_equity,
-                "current_ratio": current_ratio,
-                "market_cap": market_cap,
-                "fundamental_source": "sec_companyfacts_mirror_pit",
-                "source_forms": ",".join(forms),
-                "source_accessions": ",".join(accessions[:5]),
-            })
-            pair_count += 1
-
-        if pair_count:
+        out = pd.DataFrame({
+            "ticker": ticker,
+            "cik": cik,
+            "available_date": dates,
+            "roe": state["roe"],
+            "roic": state["roic"],
+            "roa": state["roa"],
+            "operating_margin": state["operating_margin"],
+            "fcf_margin": state["fcf_margin"],
+            "fcf_to_net_income": state["fcf_to_net_income"],
+            "asset_turnover": state["asset_turnover"],
+            "debt_to_equity": state["debt_to_equity"],
+            "net_debt_to_equity": state["net_debt_to_equity"],
+            "current_ratio": state["current_ratio"],
+            "market_cap": state["market_cap"],
+            "fundamental_source": "sec_companyfacts_mirror_pit",
+            "source_forms": provenance_cols["source_forms"],
+            "source_accessions": provenance_cols["source_accessions"],
+        })
+        metric_cols = ["roe", "fcf_margin", "debt_to_equity", "net_debt_to_equity", "market_cap"]
+        out = out[out[metric_cols].notna().any(axis=1)].copy()
+        if not out.empty:
+            rows.append(out)
             built_tickers.add(ticker)
             built_ciks.add(cik)
+
         for key, frame in frames.items():
             audits.append({
                 "ticker": ticker,
@@ -284,14 +329,18 @@ def build_from_mirror_facts(prices: pd.DataFrame, facts: pd.DataFrame) -> tuple[
                 "metric": key,
                 "selected_tags": ",".join(sorted(frame["tag"].dropna().unique().tolist())) if not frame.empty else "",
                 "fact_contexts": int(len(frame)),
-                "pair_output_rows": pair_count,
+                "pair_output_rows": int(len(out)),
             })
+        if pair_i % 100 == 0 or pair_i == len(pairs):
+            print(f"[fundamentals] processed {pair_i}/{len(pairs)} ticker-CIK pairs; built={len(built_tickers)} tickers")
 
-    result = pd.DataFrame(rows)
+    result = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
     if result.empty:
         raise RuntimeError("SEC mirror facts produced no point-in-time fundamentals")
     result["available_date"] = pd.to_datetime(result["available_date"])
-    result = result.sort_values(["ticker", "cik", "available_date"]).drop_duplicates(["ticker", "cik", "available_date"], keep="last")
+    result = result.sort_values(["ticker", "cik", "available_date"]).drop_duplicates(
+        ["ticker", "cik", "available_date"], keep="last"
+    )
     result["available_date"] = result["available_date"].dt.date.astype(str)
     audit = pd.DataFrame(audits)
     metadata = {
@@ -306,6 +355,7 @@ def build_from_mirror_facts(prices: pd.DataFrame, facts: pd.DataFrame) -> tuple[
         "multi_cik_tickers": multi_cik_tickers,
         "ttm_rule": "derive standalone quarters from direct 3-month and cumulative contexts; fallback to latest annual context",
         "balance_rule": "average latest balance with prior balance at least 180 days earlier when available",
+        "engine": "incremental filing-context state with vectorized cross-metric calculations",
     }
     return result, audit, metadata
 
