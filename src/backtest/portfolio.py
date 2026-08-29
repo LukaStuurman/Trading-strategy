@@ -30,12 +30,34 @@ class PortfolioMetrics:
         return asdict(self)
 
 
+def _normalize_cik(value) -> str:
+    if value is None or pd.isna(value):
+        return "NO-CIK"
+    text = str(value).strip()
+    if not text:
+        return "NO-CIK"
+    try:
+        text = str(int(float(text)))
+    except (TypeError, ValueError):
+        digits = "".join(ch for ch in text if ch.isdigit())
+        if not digits:
+            return "NO-CIK"
+        text = str(int(digits))
+    return text.zfill(10)
+
+
+def _instrument_id(ticker: str, cik) -> str:
+    return f"{ticker}|{_normalize_cik(cik)}"
+
+
 class PortfolioSimulator:
     """Daily mark-to-market simulator for pre-generated entry/exit trades.
 
     Entries use recorded open prices. Exit proceeds use each trade's `net_return`,
     preserving the strategy's round-trip cost assumption. Active positions are
-    marked at the daily close between entry and exit.
+    marked at the daily close between entry and exit. When CIK is available it
+    forms part of the market-data key so recycled ticker symbols never mark to a
+    different issuer.
     """
 
     def __init__(self, prices: pd.DataFrame, config: PortfolioConfig = PortfolioConfig()):
@@ -43,10 +65,18 @@ class PortfolioSimulator:
         p = prices.copy()
         p["date"] = pd.to_datetime(p["date"]).dt.normalize()
         p["ticker"] = p["ticker"].astype(str).str.upper()
-        p = p.sort_values(["date", "ticker"])
+        if "cik" not in p.columns:
+            p["cik"] = None
+        p["_instrument_id"] = [
+            _instrument_id(ticker, cik) for ticker, cik in zip(p["ticker"], p["cik"])
+        ]
+        p = p.sort_values(["date", "_instrument_id"])
+        duplicates = p.duplicated(["date", "_instrument_id"])
+        if duplicates.any():
+            raise ValueError(f"duplicate date/instrument rows in portfolio prices: {int(duplicates.sum())}")
         self.dates = pd.DatetimeIndex(sorted(p["date"].unique()))
-        self.open_lookup = p.set_index(["date", "ticker"])["open"].to_dict()
-        self.close_lookup = p.set_index(["date", "ticker"])["close"].to_dict()
+        self.open_lookup = p.set_index(["date", "_instrument_id"])["open"].to_dict()
+        self.close_lookup = p.set_index(["date", "_instrument_id"])["close"].to_dict()
 
     def run(self, trades: pd.DataFrame) -> tuple[PortfolioMetrics, pd.DataFrame, pd.DataFrame]:
         cfg = self.config
@@ -58,6 +88,11 @@ class PortfolioSimulator:
         t["entry_date"] = pd.to_datetime(t["entry_date"]).dt.normalize()
         t["exit_date"] = pd.to_datetime(t["exit_date"]).dt.normalize()
         t["ticker"] = t["ticker"].astype(str).str.upper()
+        if "cik" not in t.columns:
+            t["cik"] = None
+        t["_instrument_id"] = [
+            _instrument_id(ticker, cik) for ticker, cik in zip(t["ticker"], t["cik"])
+        ]
         t["_trade_id"] = np.arange(len(t))
         entries = {d: g.to_dict("records") for d, g in t.groupby("entry_date")}
 
@@ -72,7 +107,7 @@ class PortfolioSimulator:
             lookup = self.open_lookup if use_open else self.close_lookup
             total = 0.0
             for pos in active.values():
-                px = lookup.get((date, pos["ticker"]))
+                px = lookup.get((date, pos["instrument_id"]))
                 if px is None or not np.isfinite(px):
                     px = pos.get("last_price", pos["entry_price"])
                 else:
@@ -98,6 +133,8 @@ class PortfolioSimulator:
                 trade_id = int(trade["_trade_id"])
                 active[trade_id] = {
                     "ticker": ticker,
+                    "cik": trade.get("cik"),
+                    "instrument_id": trade["_instrument_id"],
                     "shares": allocation / entry_price,
                     "allocated": allocation,
                     "entry_price": entry_price,
@@ -106,7 +143,14 @@ class PortfolioSimulator:
                     "net_return": float(trade["net_return"]),
                 }
                 cash -= allocation
-                accepted.append({"trade_id": trade_id, "ticker": ticker, "entry_date": date, "exit_date": trade["exit_date"], "allocated": allocation})
+                accepted.append({
+                    "trade_id": trade_id,
+                    "ticker": ticker,
+                    "cik": trade.get("cik"),
+                    "entry_date": date,
+                    "exit_date": trade["exit_date"],
+                    "allocated": allocation,
+                })
 
             for trade_id, pos in list(active.items()):
                 if pos["exit_date"] == date:
