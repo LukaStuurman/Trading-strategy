@@ -67,21 +67,38 @@ def _quality_mask(f: pd.DataFrame, cfg: QualityDipConfig) -> pd.Series:
     )
 
 
+def _rank_factor_within_universe(out: pd.DataFrame, values: pd.Series, *, ascending: bool) -> pd.Series:
+    """Cross-sectionally rank a factor only against members eligible that day."""
+    if "in_universe" in out.columns:
+        eligible = out["in_universe"].fillna(False).astype(bool)
+    else:
+        eligible = pd.Series(True, index=out.index)
+    usable = eligible & values.notna() & out["date"].notna()
+    ranked = pd.Series(np.nan, index=out.index, dtype=float)
+    if usable.any():
+        ranked.loc[usable] = values.loc[usable].groupby(out.loc[usable, "date"]).rank(
+            pct=True, ascending=ascending
+        )
+    return ranked
+
+
 def _attach_quality_percentile(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     ranked = []
     for col in POSITIVE_QUALITY_FACTORS:
         if col in out.columns:
             values = pd.to_numeric(out[col], errors="coerce")
-            ranked.append(values.groupby(out["date"]).rank(pct=True, ascending=True))
+            ranked.append(_rank_factor_within_universe(out, values, ascending=True))
     for col in NEGATIVE_QUALITY_FACTORS:
         if col in out.columns:
             values = pd.to_numeric(out[col], errors="coerce")
-            ranked.append(values.groupby(out["date"]).rank(pct=True, ascending=False))
+            ranked.append(_rank_factor_within_universe(out, values, ascending=False))
     if not ranked:
         out["quality_percentile"] = np.nan
     else:
         out["quality_percentile"] = pd.concat(ranked, axis=1).mean(axis=1, skipna=True)
+        if "in_universe" in out.columns:
+            out.loc[~out["in_universe"].fillna(False).astype(bool), "quality_percentile"] = np.nan
     return out
 
 
