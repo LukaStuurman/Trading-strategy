@@ -50,6 +50,30 @@ def _instrument_id(ticker: str, cik) -> str:
     return f"{ticker}|{_normalize_cik(cik)}"
 
 
+def _prioritize_entries(trades: pd.DataFrame) -> pd.DataFrame:
+    """Deterministically rank same-day candidates using only signal-time data.
+
+    Portfolio capacity must never depend on accidental dataframe/ticker order.
+    Higher cross-sectional quality is preferred first, then the more negative
+    signal return (the larger dip). Ticker/instrument are deterministic ties.
+    Missing optional signal fields sort behind observed values.
+    """
+    t = trades.copy()
+    if "quality_percentile" in t.columns:
+        t["_quality_priority"] = pd.to_numeric(t["quality_percentile"], errors="coerce").fillna(-np.inf)
+    else:
+        t["_quality_priority"] = -np.inf
+    if "signal_return" in t.columns:
+        t["_drop_priority"] = pd.to_numeric(t["signal_return"], errors="coerce").fillna(np.inf)
+    else:
+        t["_drop_priority"] = np.inf
+    return t.sort_values(
+        ["entry_date", "_quality_priority", "_drop_priority", "ticker", "_instrument_id"],
+        ascending=[True, False, True, True, True],
+        kind="stable",
+    ).reset_index(drop=True)
+
+
 class PortfolioSimulator:
     """Daily mark-to-market simulator for pre-generated entry/exit trades.
 
@@ -57,7 +81,8 @@ class PortfolioSimulator:
     preserving the strategy's round-trip cost assumption. Active positions are
     marked at the daily close between entry and exit. When CIK is available it
     forms part of the market-data key so recycled ticker symbols never mark to a
-    different issuer.
+    different issuer. If same-day candidates exceed remaining capacity, only
+    causal signal fields determine priority: quality percentile, then dip size.
     """
 
     def __init__(self, prices: pd.DataFrame, config: PortfolioConfig = PortfolioConfig()):
@@ -93,8 +118,9 @@ class PortfolioSimulator:
         t["_instrument_id"] = [
             _instrument_id(ticker, cik) for ticker, cik in zip(t["ticker"], t["cik"])
         ]
+        t = _prioritize_entries(t)
         t["_trade_id"] = np.arange(len(t))
-        entries = {d: g.to_dict("records") for d, g in t.groupby("entry_date")}
+        entries = {d: g.to_dict("records") for d, g in t.groupby("entry_date", sort=True)}
 
         cash = float(cfg.initial_cash)
         active: dict[int, dict] = {}
