@@ -42,7 +42,6 @@ def _numeric_column(f: pd.DataFrame, name: str) -> pd.Series:
 
 
 def _quality_mask(f: pd.DataFrame, cfg: QualityDipConfig) -> pd.Series:
-    """Absolute quality gate with explicit fallback semantics."""
     roe = _numeric_column(f, "roe")
     fcf_margin = _numeric_column(f, "fcf_margin")
     debt_to_equity = _numeric_column(f, "debt_to_equity")
@@ -87,60 +86,104 @@ def _attach_quality_percentile(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _datetime_ns(values: pd.Series) -> pd.Series:
-    """Normalize datetime precision for pandas merge_asof.
-
-    Pandas 3 preserves the resolution of Parquet/CSV inputs more faithfully,
-    so FINSABER dates can arrive as datetime64[ms] while fundamental dates are
-    datetime64[us]. merge_asof requires an identical dtype on both keys.
-    """
     return pd.to_datetime(values, errors="coerce").astype("datetime64[ns]")
 
 
-def prepare_features(
-    prices: pd.DataFrame,
-    fundamentals: pd.DataFrame,
-    universe: pd.DataFrame | None = None,
-) -> pd.DataFrame:
-    """Build the causal daily feature table once for a full parameter sweep."""
+def _normalize_cik_value(value) -> str | None:
+    if pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        text = str(int(float(text)))
+    except (TypeError, ValueError):
+        digits = "".join(ch for ch in text if ch.isdigit())
+        if not digits:
+            return None
+        text = str(int(digits))
+    return text.zfill(10)
+
+
+def _fundamental_groups(f: pd.DataFrame, columns: list[str]):
+    specific: dict[tuple[str, str], pd.DataFrame] = {}
+    fallback: dict[str, pd.DataFrame] = {}
+    if "cik" in f.columns:
+        with_cik = f[f["cik"].notna()]
+        specific = {
+            (ticker, cik): g[columns].sort_values("available_date")
+            for (ticker, cik), g in with_cik.groupby(["ticker", "cik"], sort=False)
+        }
+        no_cik = f[f["cik"].isna()]
+        fallback = {
+            ticker: g[columns].sort_values("available_date")
+            for ticker, g in no_cik.groupby("ticker", sort=False)
+        }
+    else:
+        fallback = {
+            ticker: g[columns].sort_values("available_date")
+            for ticker, g in f.groupby("ticker", sort=False)
+        }
+    return specific, fallback
+
+
+def prepare_features(prices: pd.DataFrame, fundamentals: pd.DataFrame, universe: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Build causal features while isolating reused ticker symbols by CIK."""
     p = prices.copy()
     f = fundamentals.copy()
     p["date"] = _datetime_ns(p["date"])
     f["available_date"] = _datetime_ns(f["available_date"])
     p["ticker"] = p["ticker"].map(normalize_ticker)
     f["ticker"] = f["ticker"].map(normalize_ticker)
-    p = p.dropna(subset=["date"]).sort_values(["ticker", "date"]).reset_index(drop=True)
-    f = f.dropna(subset=["available_date"]).sort_values(["ticker", "available_date"]).reset_index(drop=True)
-    p["daily_return"] = p.groupby("ticker", sort=False)["close"].pct_change()
 
-    fundamental_cols = [c for c in f.columns if c != "ticker"]
-    fundamental_groups = {
-        ticker: g[fundamental_cols].sort_values("available_date")
-        for ticker, g in f.groupby("ticker", sort=False)
-    }
+    if "cik" in p.columns:
+        p["cik"] = p["cik"].map(_normalize_cik_value)
+    else:
+        p["cik"] = None
+    if "cik" in f.columns:
+        f["cik"] = f["cik"].map(_normalize_cik_value)
+
+    p = p.dropna(subset=["date", "ticker"]).copy()
+    p["_instrument_id"] = p["ticker"] + "|" + p["cik"].fillna("NO-CIK")
+    p = p.sort_values(["_instrument_id", "date"]).reset_index(drop=True)
+    f = f.dropna(subset=["available_date", "ticker"]).sort_values(["ticker", "available_date"]).reset_index(drop=True)
+    p["daily_return"] = p.groupby("_instrument_id", sort=False)["close"].pct_change()
+
+    fundamental_cols = [c for c in f.columns if c not in {"ticker", "cik"}]
+    specific_groups, fallback_groups = _fundamental_groups(f, fundamental_cols)
     merged = []
-    for ticker, gp in p.groupby("ticker", sort=False):
-        gf = fundamental_groups.get(ticker)
+    for _, gp in p.groupby("_instrument_id", sort=False):
         gp = gp.sort_values("date")
-        if gf is None or gf.empty:
+        ticker = str(gp["ticker"].iloc[0])
+        cik = gp["cik"].iloc[0]
+        parts = []
+        if cik is not None and not pd.isna(cik):
+            specific = specific_groups.get((ticker, str(cik)))
+            if specific is not None and not specific.empty:
+                specific = specific.copy()
+                specific["_specific_source"] = 1
+                parts.append(specific)
+        generic = fallback_groups.get(ticker)
+        if generic is not None and not generic.empty:
+            generic = generic.copy()
+            generic["_specific_source"] = 0
+            parts.append(generic)
+
+        if not parts:
             x = gp.copy()
             for col in fundamental_cols:
                 x[col] = pd.NaT if col == "available_date" else np.nan
         else:
-            x = pd.merge_asof(
-                gp,
-                gf,
-                left_on="date",
-                right_on="available_date",
-                direction="backward",
-                allow_exact_matches=True,
-            )
+            gf = pd.concat(parts, ignore_index=True)
+            gf = gf.sort_values(["available_date", "_specific_source"]).drop_duplicates("available_date", keep="last").drop(columns="_specific_source")
+            x = pd.merge_asof(gp, gf, left_on="date", right_on="available_date", direction="backward", allow_exact_matches=True)
         merged.append(x)
 
     out = pd.concat(merged, ignore_index=True) if merged else p.copy()
     out = attach_membership(out, universe)
     out = _attach_quality_percentile(out)
-    out = out.sort_values(["ticker", "date"]).reset_index(drop=True)
-    out["_ticker_row"] = out.groupby("ticker", sort=False).cumcount().astype("int32")
+    out = out.sort_values(["_instrument_id", "date"]).reset_index(drop=True)
+    out["_ticker_row"] = out.groupby("_instrument_id", sort=False).cumcount().astype("int32")
     return out
 
 
@@ -154,19 +197,7 @@ def _empty_trades() -> pd.DataFrame:
     ])
 
 
-def generate_trades(
-    prices: pd.DataFrame,
-    fundamentals: pd.DataFrame,
-    cfg: QualityDipConfig,
-    *,
-    universe: pd.DataFrame | None = None,
-    prepared: pd.DataFrame | None = None,
-) -> pd.DataFrame:
-    """Generate trades with vectorized future-row joins.
-
-    `wait_days=0` means next-session open. Stabilization consumes the next full
-    session, so the earliest stabilized entry is the following session open.
-    """
+def generate_trades(prices: pd.DataFrame, fundamentals: pd.DataFrame, cfg: QualityDipConfig, *, universe: pd.DataFrame | None = None, prepared: pd.DataFrame | None = None) -> pd.DataFrame:
     features = prepared if prepared is not None else prepare_features(prices, fundamentals, universe)
     if features.empty:
         return _empty_trades()
@@ -180,7 +211,7 @@ def generate_trades(
         & q_pct.notna()
         & (q_pct >= cfg.min_quality_percentile)
     )
-    signal_cols = ["ticker", "date", "daily_return", "quality_percentile", "close", "_ticker_row"]
+    signal_cols = ["ticker", "_instrument_id", "date", "daily_return", "quality_percentile", "close", "_ticker_row"]
     if "low" in features.columns:
         signal_cols.append("low")
     if "fundamental_source" in features.columns:
@@ -192,12 +223,8 @@ def generate_trades(
         return _empty_trades()
 
     signals = signals.rename(columns={
-        "date": "signal_date",
-        "daily_return": "signal_return",
-        "close": "signal_close",
-        "low": "signal_low",
-        "available_date": "fundamental_available_date",
-        "_ticker_row": "signal_i",
+        "date": "signal_date", "daily_return": "signal_return", "close": "signal_close",
+        "low": "signal_low", "available_date": "fundamental_available_date", "_ticker_row": "signal_i",
     })
     if "signal_low" not in signals.columns:
         signals["signal_low"] = np.nan
@@ -206,15 +233,12 @@ def generate_trades(
     if "fundamental_available_date" not in signals.columns:
         signals["fundamental_available_date"] = pd.NaT
 
+    join_keys = ["_instrument_id"]
     if cfg.require_stabilization:
-        confirm_lookup = features[["ticker", "_ticker_row", "close"] + (["low"] if "low" in features.columns else [])].copy()
-        confirm_lookup = confirm_lookup.rename(columns={
-            "_ticker_row": "confirm_i",
-            "close": "confirm_close",
-            "low": "confirm_low",
-        })
+        confirm_lookup = features[join_keys + ["_ticker_row", "close"] + (["low"] if "low" in features.columns else [])].copy()
+        confirm_lookup = confirm_lookup.rename(columns={"_ticker_row": "confirm_i", "close": "confirm_close", "low": "confirm_low"})
         signals["confirm_i"] = signals["signal_i"] + 1
-        signals = signals.merge(confirm_lookup, on=["ticker", "confirm_i"], how="inner")
+        signals = signals.merge(confirm_lookup, on=join_keys + ["confirm_i"], how="inner")
         stabilized = signals["confirm_close"] > signals["signal_close"]
         if "confirm_low" in signals.columns:
             both_lows = signals["confirm_low"].notna() & signals["signal_low"].notna()
@@ -226,23 +250,14 @@ def generate_trades(
     minimum_offset = 2 if cfg.require_stabilization else 1
     entry_offset = max(cfg.wait_days + 1, minimum_offset)
     signals["entry_i"] = signals["signal_i"] + entry_offset
-
-    entry_lookup = features[["ticker", "_ticker_row", "date", "open"]].rename(columns={
-        "_ticker_row": "entry_i",
-        "date": "entry_date",
-        "open": "entry_price",
-    })
-    signals = signals.merge(entry_lookup, on=["ticker", "entry_i"], how="inner")
+    entry_lookup = features[join_keys + ["_ticker_row", "date", "open"]].rename(columns={"_ticker_row": "entry_i", "date": "entry_date", "open": "entry_price"})
+    signals = signals.merge(entry_lookup, on=join_keys + ["entry_i"], how="inner")
     if signals.empty:
         return _empty_trades()
 
     signals["exit_i"] = signals["entry_i"] + cfg.hold_days
-    exit_lookup = features[["ticker", "_ticker_row", "date", "close"]].rename(columns={
-        "_ticker_row": "exit_i",
-        "date": "exit_date",
-        "close": "exit_price",
-    })
-    signals = signals.merge(exit_lookup, on=["ticker", "exit_i"], how="inner")
+    exit_lookup = features[join_keys + ["_ticker_row", "date", "close"]].rename(columns={"_ticker_row": "exit_i", "date": "exit_date", "close": "exit_price"})
+    signals = signals.merge(exit_lookup, on=join_keys + ["exit_i"], how="inner")
     if signals.empty:
         return _empty_trades()
 
@@ -253,6 +268,4 @@ def generate_trades(
     signals["hold_days"] = cfg.hold_days
     signals["min_quality_percentile"] = cfg.min_quality_percentile
     signals["require_stabilization"] = cfg.require_stabilization
-
-    columns = _empty_trades().columns.tolist()
-    return signals[columns].sort_values(["signal_date", "ticker"]).reset_index(drop=True)
+    return signals[_empty_trades().columns.tolist()].sort_values(["signal_date", "ticker"]).reset_index(drop=True)

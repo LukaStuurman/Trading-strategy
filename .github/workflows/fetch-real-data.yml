@@ -6,8 +6,10 @@ on:
     paths:
       - '.github/workflows/fetch-real-data.yml'
       - 'scripts/download_finsaber_prices.py'
+      - 'scripts/download_sec_facts_mirror.py'
       - 'scripts/download_sp500_membership.py'
       - 'scripts/build_fundamentals.py'
+      - 'scripts/build_mirror_fundamentals.py'
       - 'scripts/build_research_panel.py'
       - 'scripts/build_sec_fundamentals.py'
       - 'scripts/build_universe.py'
@@ -21,6 +23,10 @@ on:
       - 'requirements.txt'
   workflow_dispatch:
 
+concurrency:
+  group: finsaber-quality-dip-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -31,28 +37,29 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}
       HF_HOME: ${{ github.workspace }}/.hf-cache
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
-
       - name: Cache FINSABER source partitions
         uses: actions/cache@v4
         with:
           path: .hf-cache
           key: finsaber-v2-prices-${{ runner.os }}-v1
-
+      - name: Cache SEC Company Facts mirror shards
+        uses: actions/cache@v4
+        with:
+          path: .sec-mirror-cache
+          key: sec-company-facts-parquet-latest-${{ runner.os }}-v1
       - name: Install dependencies
         run: pip install -r requirements.txt
-
       - name: Run tests
         run: pytest -q
-
       - name: Download and pin FINSABER-2 prices
         run: |
           python scripts/download_finsaber_prices.py \
@@ -63,19 +70,16 @@ jobs:
             --min-rows 4500000 \
             --min-tickers 750 \
             --max-invalid-ohlc-rows 1000
-
       - name: Download and pin historical S&P membership
         run: |
           python scripts/download_sp500_membership.py \
             --output-dir data/real/raw \
             --manifest data/real/sp500_membership_manifest.json
-
       - name: Build historical universe intervals
         run: |
           python scripts/build_universe.py \
             --history data/real/raw/sp_500_historical_components.csv \
             --output data/real/universe_intervals.csv
-
       - name: Validate broad FINSABER market data
         run: |
           python scripts/validate_research_data.py \
@@ -85,15 +89,23 @@ jobs:
             --min-total-price-rows 4500000 \
             --min-price-tickers 750 \
             --min-rows-per-ticker 2
-
-      - name: Build causal fundamentals for available tickers
+      - name: Download point-in-time SEC Company Facts mirror
         run: |
-          python scripts/build_fundamentals.py \
+          python scripts/download_sec_facts_mirror.py \
             --prices data/real/finsaber_prices.parquet \
+            --output data/real/sec_mirror_facts.parquet \
+            --manifest data/real/sec_facts_mirror_manifest.json \
+            --cache-dir .sec-mirror-cache \
+            --min-matched-ciks 600
+      - name: Build point-in-time fundamentals from SEC mirror
+        run: |
+          python scripts/build_mirror_fundamentals.py \
+            --prices data/real/finsaber_prices.parquet \
+            --facts data/real/sec_mirror_facts.parquet \
             --output data/real/fundamentals.csv \
             --audit data/real/fundamentals_audit.csv \
-            --source data/real/fundamentals_source.json
-
+            --source data/real/fundamentals_source.json \
+            --mirror-manifest data/real/sec_facts_mirror_manifest.json
       - name: Build fundamental-covered research panel
         run: |
           python scripts/build_research_panel.py \
@@ -102,7 +114,6 @@ jobs:
             --universe data/real/universe_intervals.csv \
             --output data/real/research_prices.parquet \
             --coverage data/real/research_coverage.json
-
       - name: Validate causal quality research panel
         run: |
           python scripts/validate_research_data.py \
@@ -110,7 +121,6 @@ jobs:
             --fundamentals data/real/fundamentals.csv \
             --universe data/real/universe_intervals.csv \
             --report data/real/validation_full.json
-
       - name: Run 384 quality-dip robustness variants
         run: |
           python scripts/run_quality_dip_sweep.py \
@@ -122,19 +132,20 @@ jobs:
             --output results/quality_dip_real \
             --initial-capital 10000 \
             --max-positions 10 \
-            --max-position-fraction 0.10
-
+            --max-position-fraction 0.10 \
+            --train-end 2020-10-12 \
+            --validation-end 2023-05-19
       - name: Keep reproducible membership sources
         run: |
           cp data/real/raw/sp_500_historical_components.csv data/real/sp500_historical_components.csv
           cp data/real/raw/sp500_constituents.csv data/real/sp500_current_constituents.csv
-
       - name: Commit compact provenance and research outputs
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
             data/real/finsaber_price_manifest.json \
+            data/real/sec_facts_mirror_manifest.json \
             data/real/sp500_membership_manifest.json \
             data/real/fundamentals.csv \
             data/real/fundamentals_audit.csv \
