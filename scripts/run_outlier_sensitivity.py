@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Stress-test top quality-dip variants against extreme adjusted-price moves.
+"""Stress-test selected quality-dip variants against extreme adjusted-price moves.
 
 The primary backtest is left untouched. This diagnostic identifies instrument
 close-to-close moves above a configurable absolute threshold and recomputes OOS
 trade/portfolio metrics after excluding only trades whose signal-to-exit window
-crosses one of those dates. This makes data-anomaly sensitivity explicit rather
-than silently deleting observations from the research dataset.
+crosses one of those dates. OOS membership is determined by entry date, exactly
+matching the primary purged split.
 """
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ def main() -> None:
     outliers.to_csv(output / "price_outliers.csv", index=False)
     marked = mark_crossing_trades(trades, lookup)
     oos_start = pd.Timestamp(args.oos_start).normalize()
-    marked["signal_date"] = pd.to_datetime(marked["signal_date"]).dt.normalize()
+    marked["entry_date"] = pd.to_datetime(marked["entry_date"], errors="coerce").dt.normalize()
     simulator = PortfolioSimulator(
         prices,
         PortfolioConfig(
@@ -146,7 +146,7 @@ def main() -> None:
     rank = {str(v): i + 1 for i, v in enumerate(leaderboard["variant_id"].astype(str).tolist())}
     rows = []
     for variant_id, group in marked.groupby("variant_id", sort=False):
-        oos = group[group["signal_date"] >= oos_start].copy()
+        oos = group[group["entry_date"] >= oos_start].copy()
         clean = oos[~oos["crosses_extreme_move"]].copy()
         base_stats = summarize_trades(oos)
         clean_stats = summarize_trades(clean)
@@ -178,9 +178,9 @@ def main() -> None:
         "# Extreme-price-move sensitivity", "",
         f"Threshold: absolute close-to-close adjusted return > **{args.threshold:.0%}**.",
         f"Detected price outlier rows: **{len(outliers)}**.",
-        f"OOS starts: **{oos_start.date()}**.", "",
-        "The primary backtest is not altered. This report only removes a trade in the stress case when an extreme-move date falls between its signal date and exit date, inclusive.",
-        "", "## Top leaderboard variants", "",
+        f"OOS entries start: **{oos_start.date()}**.", "",
+        "The primary backtest is not altered. OOS membership follows entry date, matching the primary split. The stress case removes a trade only when an extreme-move date falls between its signal date and exit date, inclusive.",
+        "", "## Validation-selected variants", "",
     ]
     show_cols = [
         "leaderboard_rank", "variant_id", "oos_trades", "oos_crossing_extreme_move_trades",
@@ -188,12 +188,12 @@ def main() -> None:
         "clean_oos_portfolio_total_return", "oos_portfolio_max_drawdown", "clean_oos_portfolio_max_drawdown",
     ]
     if sensitivity.empty:
-        report.append("No top-variant trades were available for sensitivity analysis.")
+        report.append("No selected-variant OOS trades were available for sensitivity analysis.")
     else:
         report.append(_markdown_table(sensitivity.head(20), show_cols))
     report.extend([
         "", "## Reading this stress test", "",
-        "- Similar baseline and clean metrics indicate the signal is not being driven by extreme source moves.",
+        "- Similar baseline and clean metrics indicate the selected signal is not being driven by extreme source moves.",
         "- A large deterioration after exclusion is a warning to inspect the named rows in `price_outliers.csv` before trusting the strategy.",
         "- This is a data-quality stress test, not a claim that every >300% move is erroneous.",
     ])
