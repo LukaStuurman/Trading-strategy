@@ -26,6 +26,7 @@ def main() -> None:
     p.add_argument("--output", required=True)
     p.add_argument("--coverage", required=True)
     p.add_argument("--warmup-days", type=int, default=10)
+    p.add_argument("--min-post-fundamental-rows", type=int, default=100)
     args = p.parse_args()
 
     prices = read_table(args.prices)
@@ -41,22 +42,35 @@ def main() -> None:
     universe_tickers = set(universe["ticker"].dropna().unique())
     fundamental_tickers = set(fundamentals["ticker"].dropna().unique())
     historical_price_tickers = price_tickers & universe_tickers
-    eligible_tickers = historical_price_tickers & fundamental_tickers
+    eligible_before_history_gate = historical_price_tickers & fundamental_tickers
 
     first_available = (
-        fundamentals[fundamentals["ticker"].isin(eligible_tickers)]
+        fundamentals[fundamentals["ticker"].isin(eligible_before_history_gate)]
         .dropna(subset=["available_date"])
         .groupby("ticker")["available_date"]
         .min()
     )
-    panel = prices[prices["ticker"].isin(eligible_tickers)].copy()
-    panel["first_fundamental_date"] = panel["ticker"].map(first_available)
+
+    candidate_prices = prices[prices["ticker"].isin(eligible_before_history_gate)].copy()
+    candidate_prices["first_fundamental_date"] = candidate_prices["ticker"].map(first_available)
+    post_available = candidate_prices[
+        candidate_prices["first_fundamental_date"].notna()
+        & (candidate_prices["date"] >= candidate_prices["first_fundamental_date"])
+    ]
+    post_counts = post_available.groupby("ticker").size().reindex(sorted(eligible_before_history_gate), fill_value=0)
+    usable_tickers = set(post_counts[post_counts >= args.min_post_fundamental_rows].index)
+    insufficient = {
+        str(ticker): int(count)
+        for ticker, count in post_counts[post_counts < args.min_post_fundamental_rows].items()
+    }
+
+    panel = candidate_prices[candidate_prices["ticker"].isin(usable_tickers)].copy()
     cutoff = panel["first_fundamental_date"] - pd.to_timedelta(args.warmup_days, unit="D")
     panel = panel[panel["date"] >= cutoff].drop(columns=["first_fundamental_date"])
     panel = panel.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last")
 
     if panel.empty:
-        raise RuntimeError("Research panel is empty after intersecting prices, historical membership and fundamentals")
+        raise RuntimeError("Research panel is empty after causal fundamental and history-coverage gates")
 
     coverage = {
         "source_prices": str(args.prices),
@@ -67,10 +81,16 @@ def main() -> None:
         "historical_universe_tickers": len(universe_tickers),
         "historical_price_tickers": len(historical_price_tickers),
         "fundamental_tickers": len(fundamental_tickers),
-        "eligible_quality_tickers": len(eligible_tickers),
+        "eligible_quality_tickers_before_history_gate": len(eligible_before_history_gate),
+        "eligible_quality_tickers": len(usable_tickers),
         "fundamental_ticker_coverage_of_historical_prices": (
-            len(eligible_tickers) / len(historical_price_tickers) if historical_price_tickers else 0.0
+            len(eligible_before_history_gate) / len(historical_price_tickers) if historical_price_tickers else 0.0
         ),
+        "research_ticker_coverage_of_historical_prices": (
+            len(usable_tickers) / len(historical_price_tickers) if historical_price_tickers else 0.0
+        ),
+        "minimum_post_fundamental_price_rows": args.min_post_fundamental_rows,
+        "insufficient_post_fundamental_history": insufficient,
         "missing_fundamental_tickers": sorted(historical_price_tickers - fundamental_tickers),
         "price_tickers_outside_membership_source": sorted(price_tickers - universe_tickers),
         "panel_start": panel["date"].min().date().isoformat(),
@@ -81,8 +101,8 @@ def main() -> None:
         ),
         "interpretation": (
             "FINSABER removes the price-history survivorship bottleneck, but the quality strategy remains limited "
-            "to tickers with causal fundamentals. Missing fundamental tickers are reported explicitly and are not "
-            "treated as failed quality screens."
+            "to tickers with causal fundamentals and at least the configured amount of post-fundamental price history. "
+            "Missing/insufficient tickers are reported explicitly and are not treated as failed quality screens."
         ),
     }
 
@@ -91,9 +111,13 @@ def main() -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(coverage, indent=2, default=str), encoding="utf-8")
     print(
-        f"Research panel: {len(panel):,} rows, {len(eligible_tickers)} eligible tickers; "
-        f"fundamental ticker coverage={coverage['fundamental_ticker_coverage_of_historical_prices']:.1%}"
+        f"Research panel: {len(panel):,} rows, {len(usable_tickers)} usable tickers "
+        f"({len(eligible_before_history_gate)} had fundamentals before history gate); "
+        f"research coverage={coverage['research_ticker_coverage_of_historical_prices']:.1%}"
     )
+    if insufficient:
+        sample = ", ".join(f"{k}={v}" for k, v in list(insufficient.items())[:12])
+        print(f"Excluded for <{args.min_post_fundamental_rows} post-fundamental rows: {sample}")
 
 
 if __name__ == "__main__":
