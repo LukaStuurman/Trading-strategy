@@ -86,6 +86,16 @@ def _attach_quality_percentile(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _datetime_ns(values: pd.Series) -> pd.Series:
+    """Normalize datetime precision for pandas merge_asof.
+
+    Pandas 3 preserves the resolution of Parquet/CSV inputs more faithfully,
+    so FINSABER dates can arrive as datetime64[ms] while fundamental dates are
+    datetime64[us]. merge_asof requires an identical dtype on both keys.
+    """
+    return pd.to_datetime(values, errors="coerce").astype("datetime64[ns]")
+
+
 def prepare_features(
     prices: pd.DataFrame,
     fundamentals: pd.DataFrame,
@@ -94,16 +104,19 @@ def prepare_features(
     """Build the causal daily feature table once for a full parameter sweep."""
     p = prices.copy()
     f = fundamentals.copy()
-    p["date"] = pd.to_datetime(p["date"])
-    f["available_date"] = pd.to_datetime(f["available_date"])
+    p["date"] = _datetime_ns(p["date"])
+    f["available_date"] = _datetime_ns(f["available_date"])
     p["ticker"] = p["ticker"].map(normalize_ticker)
     f["ticker"] = f["ticker"].map(normalize_ticker)
-    p = p.sort_values(["ticker", "date"]).reset_index(drop=True)
-    f = f.sort_values(["ticker", "available_date"]).reset_index(drop=True)
+    p = p.dropna(subset=["date"]).sort_values(["ticker", "date"]).reset_index(drop=True)
+    f = f.dropna(subset=["available_date"]).sort_values(["ticker", "available_date"]).reset_index(drop=True)
     p["daily_return"] = p.groupby("ticker", sort=False)["close"].pct_change()
 
     fundamental_cols = [c for c in f.columns if c != "ticker"]
-    fundamental_groups = {ticker: g[fundamental_cols].sort_values("available_date") for ticker, g in f.groupby("ticker", sort=False)}
+    fundamental_groups = {
+        ticker: g[fundamental_cols].sort_values("available_date")
+        for ticker, g in f.groupby("ticker", sort=False)
+    }
     merged = []
     for ticker, gp in p.groupby("ticker", sort=False):
         gf = fundamental_groups.get(ticker)
