@@ -72,6 +72,24 @@ def test_finsaber_normalization_preserves_same_ticker_date_for_distinct_ciks():
     assert stats["conflicting_cik_ticker_date_groups"] == 1
 
 
+def test_finsaber_normalization_excludes_rows_outside_declared_partition_year():
+    raw = pd.DataFrame({
+        "date": ["2023-12-29", "2024-01-02"],
+        "symbol": ["AAA", "AAA"],
+        "cik": [1, 1],
+        "open": [10.0, 11.0],
+        "high": [11.0, 12.0],
+        "low": [9.0, 10.0],
+        "close": [10.0, 11.0],
+        "adjusted_close": [10.0, 11.0],
+        "volume": [100, 110],
+    })
+    out = normalize_finsaber_prices(raw, 2024)
+    assert len(out) == 1
+    assert out.iloc[0]["date"] == pd.Timestamp("2024-01-02")
+    assert out.attrs["normalization_stats"]["out_of_partition_year_rows"] == 1
+
+
 def test_table_io_round_trips_parquet(tmp_path):
     path = tmp_path / "prices.parquet"
     frame = pd.DataFrame({"ticker": ["AAA"], "date": pd.to_datetime(["2025-01-01"]), "close": [10.0]})
