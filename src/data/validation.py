@@ -51,6 +51,7 @@ def validate_prices(prices: pd.DataFrame, min_rows_per_ticker: int = 100) -> Val
         "tickers": int(p["ticker"].nunique()),
         "start": None if p["date"].dropna().empty else p["date"].min().date().isoformat(),
         "end": None if p["date"].dropna().empty else p["date"].max().date().isoformat(),
+        "min_rows_per_ticker": int(min_rows_per_ticker),
     })
     if p["date"].isna().any():
         r.errors.append(f"{int(p['date'].isna().sum())} invalid dates")
@@ -66,14 +67,20 @@ def validate_prices(prices: pd.DataFrame, min_rows_per_ticker: int = 100) -> Val
         r.errors.append("missing/non-numeric OHLC values found")
     if (p[["open", "high", "low", "close"]] <= 0).any(axis=1).any():
         r.errors.append("non-positive OHLC values found")
-    bad_high = p["high"] + 1e-12 < p[["open", "close", "low"]].max(axis=1)
-    bad_low = p["low"] - 1e-12 > p[["open", "close", "high"]].min(axis=1)
+
+    # Relative tolerance avoids rejecting otherwise-consistent adjusted bars due
+    # to sub-cent floating point multiplication noise at very large prices.
+    magnitude = p[["open", "high", "low", "close"]].abs().max(axis=1).clip(lower=1.0)
+    tol = magnitude * 1e-10
+    bad_high = p["high"] + tol < p[["open", "close", "low"]].max(axis=1)
+    bad_low = p["low"] - tol > p[["open", "close", "high"]].min(axis=1)
     if bad_high.any() or bad_low.any():
         r.errors.append(f"OHLC bounds invalid on {int(bad_high.sum() + bad_low.sum())} rows")
     if (p["volume"].fillna(0) < 0).any():
         r.errors.append("negative volume found")
     ret = p.sort_values(["ticker", "date"]).groupby("ticker")["close"].pct_change()
     extreme = int((ret.abs() > 3.0).sum())
+    r.stats["close_moves_over_300pct"] = extreme
     if extreme:
         r.warnings.append(f"{extreme} close-to-close moves exceed 300%; inspect split/source handling")
     return r
@@ -130,9 +137,15 @@ def validate_universe(intervals: pd.DataFrame) -> ValidationReport:
     return r
 
 
-def validate_all(prices: pd.DataFrame, fundamentals: pd.DataFrame | None = None, universe: pd.DataFrame | None = None) -> ValidationReport:
+def validate_all(
+    prices: pd.DataFrame,
+    fundamentals: pd.DataFrame | None = None,
+    universe: pd.DataFrame | None = None,
+    *,
+    min_rows_per_ticker: int = 100,
+) -> ValidationReport:
     out = ValidationReport()
-    out.merge(validate_prices(prices), "prices")
+    out.merge(validate_prices(prices, min_rows_per_ticker=min_rows_per_ticker), "prices")
     if fundamentals is not None:
         out.merge(validate_fundamentals(fundamentals), "fundamentals")
     if universe is not None:

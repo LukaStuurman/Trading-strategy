@@ -61,7 +61,8 @@ jobs:
             --output data/real/finsaber_prices.parquet \
             --manifest data/real/finsaber_price_manifest.json \
             --min-rows 4500000 \
-            --min-tickers 750
+            --min-tickers 750 \
+            --max-invalid-ohlc-rows 1000
 
       - name: Download and pin historical S&P membership
         run: |
@@ -82,7 +83,8 @@ jobs:
             --universe data/real/universe_intervals.csv \
             --report data/real/validation_finsaber_market.json \
             --min-total-price-rows 4500000 \
-            --min-price-tickers 750
+            --min-price-tickers 750 \
+            --min-rows-per-ticker 2
 
       - name: Build causal fundamentals for available tickers
         run: |

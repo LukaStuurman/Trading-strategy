@@ -17,12 +17,18 @@ def main() -> None:
     p.add_argument("--report", required=True)
     p.add_argument("--min-total-price-rows", type=int, default=0)
     p.add_argument("--min-price-tickers", type=int, default=0)
+    p.add_argument("--min-rows-per-ticker", type=int, default=100)
     args = p.parse_args()
 
     prices = read_table(args.prices)
     fundamentals = read_table(args.fundamentals) if args.fundamentals else None
     universe = load_universe_intervals(args.universe) if args.universe else None
-    report = validate_all(prices, fundamentals, universe)
+    report = validate_all(
+        prices,
+        fundamentals,
+        universe,
+        min_rows_per_ticker=args.min_rows_per_ticker,
+    )
 
     price_stats = report.stats.get("prices", {})
     if args.min_total_price_rows and int(price_stats.get("rows", 0)) < args.min_total_price_rows:

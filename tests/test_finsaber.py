@@ -33,6 +33,23 @@ def test_finsaber_normalization_uses_adjusted_ohlc_and_preserves_raw_close():
     assert row["low"] == 45.0
 
 
+def test_finsaber_normalization_excludes_impossible_ohlc_and_counts_it():
+    raw = pd.DataFrame({
+        "date": ["2024-01-02", "2024-01-03"],
+        "symbol": ["AAA", "AAA"],
+        "cik": [1, 1],
+        "open": [100.0, 100.0],
+        "high": [105.0, 95.0],
+        "low": [95.0, 90.0],
+        "close": [102.0, 100.0],
+        "adjusted_close": [51.0, 50.0],
+        "volume": [1000, 1000],
+    })
+    out = normalize_finsaber_prices(raw, 2024)
+    assert len(out) == 1
+    assert out.attrs["normalization_stats"]["invalid_ohlc_rows"] == 1
+
+
 def test_table_io_round_trips_parquet(tmp_path):
     path = tmp_path / "prices.parquet"
     frame = pd.DataFrame({"ticker": ["AAA"], "date": pd.to_datetime(["2025-01-01"]), "close": [10.0]})
