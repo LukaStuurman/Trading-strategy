@@ -72,7 +72,7 @@ jobs:
       - name: Build historical universe intervals
         run: |
           python scripts/build_universe.py \
-            --history data/real/raw/sp500_historical_components.csv \
+            --history data/real/raw/sp_500_historical_components.csv \
             --output data/real/universe_intervals.csv
 
       - name: Validate broad FINSABER market data
@@ -124,8 +124,8 @@ jobs:
 
       - name: Keep reproducible membership sources
         run: |
-          cp data/real/raw/sp500_historical_components.csv data/real/sp500_historical_components.csv
-          cp data/real/raw/sp500_current_constituents.csv data/real/sp500_current_constituents.csv
+          cp data/real/raw/sp_500_historical_components.csv data/real/sp500_historical_components.csv
+          cp data/real/raw/sp500_constituents.csv data/real/sp500_current_constituents.csv
 
       - name: Commit compact provenance and research outputs
         run: |
