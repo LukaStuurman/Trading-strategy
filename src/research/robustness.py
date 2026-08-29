@@ -13,15 +13,50 @@ def chronological_boundaries(prices: pd.DataFrame, train_fraction: float = 0.60,
     return pd.Timestamp(dates.iloc[train_i]), pd.Timestamp(dates.iloc[validation_i])
 
 
-def split_trades(trades: pd.DataFrame, train_end: pd.Timestamp, validation_end: pd.Timestamp, date_col: str = "entry_date") -> dict[str, pd.DataFrame]:
+def split_trades(
+    trades: pd.DataFrame,
+    train_end: pd.Timestamp,
+    validation_end: pd.Timestamp,
+    date_col: str = "entry_date",
+    exit_col: str = "exit_date",
+) -> dict[str, pd.DataFrame]:
+    """Create purged chronological trade splits.
+
+    A trade contributes to train or validation metrics only when its outcome was
+    fully observable by that split's cutoff. Trades opened before a boundary but
+    closed after it are deliberately omitted from the earlier split rather than
+    leaking future prices into parameter selection. OOS contains trades entered
+    strictly after the validation cutoff.
+    """
     if trades.empty:
         return {"train": trades.copy(), "validation": trades.copy(), "oos": trades.copy()}
+    if date_col not in trades.columns:
+        raise ValueError(f"trade split requires {date_col}")
+    if exit_col not in trades.columns:
+        raise ValueError(f"purged trade split requires {exit_col}")
+
     t = trades.copy()
-    t[date_col] = pd.to_datetime(t[date_col])
+    t[date_col] = pd.to_datetime(t[date_col], errors="coerce").dt.normalize()
+    t[exit_col] = pd.to_datetime(t[exit_col], errors="coerce").dt.normalize()
+    train_end = pd.Timestamp(train_end).normalize()
+    validation_end = pd.Timestamp(validation_end).normalize()
+    if train_end >= validation_end:
+        raise ValueError("train_end must be before validation_end")
+
+    valid_dates = t[date_col].notna() & t[exit_col].notna()
+    train_mask = valid_dates & (t[date_col] <= train_end) & (t[exit_col] <= train_end)
+    validation_mask = (
+        valid_dates
+        & (t[date_col] > train_end)
+        & (t[date_col] <= validation_end)
+        & (t[exit_col] <= validation_end)
+    )
+    oos_mask = valid_dates & (t[date_col] > validation_end)
+
     return {
-        "train": t[t[date_col] <= train_end],
-        "validation": t[(t[date_col] > train_end) & (t[date_col] <= validation_end)],
-        "oos": t[t[date_col] > validation_end],
+        "train": t.loc[train_mask].copy(),
+        "validation": t.loc[validation_mask].copy(),
+        "oos": t.loc[oos_mask].copy(),
     }
 
 
