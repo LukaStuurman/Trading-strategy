@@ -21,7 +21,7 @@ def test_cik_normalization_and_mirror_sharding():
     assert cik_bucket("0000320193") == 320193 % 64
 
 
-def test_mirror_fundamentals_use_filed_date_and_do_not_look_ahead():
+def test_mirror_fundamentals_use_next_day_after_filed_date_and_do_not_look_ahead():
     prices = pd.DataFrame({
         "ticker": ["AAA", "AAA", "AAA"], "cik": [1, 1, 1],
         "date": pd.to_datetime(["2024-12-31", "2025-02-15", "2026-02-15"]),
@@ -44,13 +44,16 @@ def test_mirror_fundamentals_use_filed_date_and_do_not_look_ahead():
         _fact("NetIncomeLoss", -500.0, filed="2026-02-15", start="2025-01-01", end="2025-12-31", accn="0001-26-000001"),
     ]
     result, audit, meta = build_from_mirror_facts(prices, pd.DataFrame(facts))
-    first = result[result["available_date"] == "2025-02-15"].iloc[0]
+    first = result[result["available_date"] == "2025-02-16"].iloc[0]
+    assert first["source_filed_date"] == "2025-02-15"
+    assert not (result["available_date"] == result["source_filed_date"]).any()
     assert math.isclose(first["roe"], 0.20)
     assert math.isclose(first["fcf_margin"], 0.10)
     assert math.isclose(first["debt_to_equity"], 0.20)
     assert math.isclose(first["current_ratio"], 2.0)
     assert math.isclose(first["market_cap"], 5000.0)
     assert first["fundamental_source"] == "sec_companyfacts_mirror_pit"
+    assert meta["availability_lag_days"] == 1
     assert meta["built_tickers"] == 1
     assert not audit.empty
 
