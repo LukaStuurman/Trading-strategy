@@ -10,6 +10,7 @@ on:
       - 'scripts/run_quality_dip_sweep.py'
       - 'src/strategies/quality_bad_news.py'
       - 'src/backtest/metrics.py'
+      - 'tests/**'
       - 'requirements.txt'
   workflow_dispatch:
 
@@ -71,12 +72,15 @@ jobs:
             data/real/fundamentals_audit.csv \
             data/real/sp500_historical_components.csv \
             data/real/sp500_current_constituents.csv \
-            data/real/download_manifest.json \
-            results/quality_dip_real/parameter_sweep.csv \
-            results/quality_dip_real/all_trades.csv || true
+            data/real/download_manifest.json
+          git add -f results/quality_dip_real/parameter_sweep.csv
+          if [ -f results/quality_dip_real/all_trades.csv ]; then
+            git add -f results/quality_dip_real/all_trades.csv
+          fi
           if git diff --cached --quiet; then
             echo 'No data changes.'
           else
             git commit -m 'data: refresh real fundamentals and quality-dip backtests'
+            git pull --rebase origin main
             git push
           fi
