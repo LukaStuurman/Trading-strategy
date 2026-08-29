@@ -1,0 +1,384 @@
+{
+  "source": "FINSABER-2 official Hugging Face dataset",
+  "repo_id": "finsaber-team/FINSABER-V2-Data",
+  "revision": "68bb21ef1500591c6f81e0cb934bcf079e807e38",
+  "layout": "price_daily/year=YYYY/part-000.parquet",
+  "years": [
+    2000,
+    2025
+  ],
+  "rows": 4901002,
+  "tickers": 1018,
+  "yearly_rows": {
+    "2000": 171987,
+    "2001": 170562,
+    "2002": 175886,
+    "2003": 177749,
+    "2004": 182402,
+    "2005": 185780,
+    "2006": 186628,
+    "2007": 187211,
+    "2008": 190080,
+    "2009": 190110,
+    "2010": 192307,
+    "2011": 194776,
+    "2012": 196711,
+    "2013": 200914,
+    "2014": 202411,
+    "2015": 203102,
+    "2016": 202713,
+    "2017": 199390,
+    "2018": 197235,
+    "2019": 195499,
+    "2020": 192830,
+    "2021": 189775,
+    "2022": 184075,
+    "2023": 179969,
+    "2024": 180072,
+    "2025": 170828
+  },
+  "yearly_normalization": {
+    "2000": {
+      "input_rows": 171987,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 171987
+    },
+    "2001": {
+      "input_rows": 170562,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 170562
+    },
+    "2002": {
+      "input_rows": 175886,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 175886
+    },
+    "2003": {
+      "input_rows": 177749,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 177749
+    },
+    "2004": {
+      "input_rows": 182402,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 182402
+    },
+    "2005": {
+      "input_rows": 185780,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 185780
+    },
+    "2006": {
+      "input_rows": 186628,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 186628
+    },
+    "2007": {
+      "input_rows": 187211,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 187211
+    },
+    "2008": {
+      "input_rows": 190080,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 190080
+    },
+    "2009": {
+      "input_rows": 190110,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 190110
+    },
+    "2010": {
+      "input_rows": 192307,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 192307
+    },
+    "2011": {
+      "input_rows": 194776,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 194776
+    },
+    "2012": {
+      "input_rows": 196711,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 196711
+    },
+    "2013": {
+      "input_rows": 200914,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 200914
+    },
+    "2014": {
+      "input_rows": 202411,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 202411
+    },
+    "2015": {
+      "input_rows": 203104,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 2,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 203102
+    },
+    "2016": {
+      "input_rows": 202713,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 202713
+    },
+    "2017": {
+      "input_rows": 199390,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 199390
+    },
+    "2018": {
+      "input_rows": 197235,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 197235
+    },
+    "2019": {
+      "input_rows": 195499,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 195499
+    },
+    "2020": {
+      "input_rows": 192830,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 192830
+    },
+    "2021": {
+      "input_rows": 189777,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 2,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 189775
+    },
+    "2022": {
+      "input_rows": 184075,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 184075
+    },
+    "2023": {
+      "input_rows": 179969,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 179969
+    },
+    "2024": {
+      "input_rows": 180078,
+      "invalid_base_rows": 6,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 180072
+    },
+    "2025": {
+      "input_rows": 170828,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "output_rows": 170828
+    }
+  },
+  "normalization_totals": {
+    "invalid_ohlc_rows_excluded": 4,
+    "max_invalid_ohlc_rows": 1000
+  },
+  "source_files": [
+    {
+      "year": 2000,
+      "filename": "price_daily/year=2000/part-000.parquet",
+      "bytes": 4261703
+    },
+    {
+      "year": 2001,
+      "filename": "price_daily/year=2001/part-000.parquet",
+      "bytes": 4908471
+    },
+    {
+      "year": 2002,
+      "filename": "price_daily/year=2002/part-000.parquet",
+      "bytes": 4993276
+    },
+    {
+      "year": 2003,
+      "filename": "price_daily/year=2003/part-000.parquet",
+      "bytes": 5006156
+    },
+    {
+      "year": 2004,
+      "filename": "price_daily/year=2004/part-000.parquet",
+      "bytes": 5118261
+    },
+    {
+      "year": 2005,
+      "filename": "price_daily/year=2005/part-000.parquet",
+      "bytes": 5183145
+    },
+    {
+      "year": 2006,
+      "filename": "price_daily/year=2006/part-000.parquet",
+      "bytes": 5200710
+    },
+    {
+      "year": 2007,
+      "filename": "price_daily/year=2007/part-000.parquet",
+      "bytes": 5381364
+    },
+    {
+      "year": 2008,
+      "filename": "price_daily/year=2008/part-000.parquet",
+      "bytes": 5520435
+    },
+    {
+      "year": 2009,
+      "filename": "price_daily/year=2009/part-000.parquet",
+      "bytes": 5402432
+    },
+    {
+      "year": 2010,
+      "filename": "price_daily/year=2010/part-000.parquet",
+      "bytes": 5481868
+    },
+    {
+      "year": 2011,
+      "filename": "price_daily/year=2011/part-000.parquet",
+      "bytes": 5610313
+    },
+    {
+      "year": 2012,
+      "filename": "price_daily/year=2012/part-000.parquet",
+      "bytes": 5540464
+    },
+    {
+      "year": 2013,
+      "filename": "price_daily/year=2013/part-000.parquet",
+      "bytes": 5697834
+    },
+    {
+      "year": 2014,
+      "filename": "price_daily/year=2014/part-000.parquet",
+      "bytes": 5768346
+    },
+    {
+      "year": 2015,
+      "filename": "price_daily/year=2015/part-000.parquet",
+      "bytes": 5815300
+    },
+    {
+      "year": 2016,
+      "filename": "price_daily/year=2016/part-000.parquet",
+      "bytes": 5694413
+    },
+    {
+      "year": 2017,
+      "filename": "price_daily/year=2017/part-000.parquet",
+      "bytes": 5619667
+    },
+    {
+      "year": 2018,
+      "filename": "price_daily/year=2018/part-000.parquet",
+      "bytes": 5613511
+    },
+    {
+      "year": 2019,
+      "filename": "price_daily/year=2019/part-000.parquet",
+      "bytes": 5592315
+    },
+    {
+      "year": 2020,
+      "filename": "price_daily/year=2020/part-000.parquet",
+      "bytes": 5595278
+    },
+    {
+      "year": 2021,
+      "filename": "price_daily/year=2021/part-000.parquet",
+      "bytes": 5648346
+    },
+    {
+      "year": 2022,
+      "filename": "price_daily/year=2022/part-000.parquet",
+      "bytes": 5350989
+    },
+    {
+      "year": 2023,
+      "filename": "price_daily/year=2023/part-000.parquet",
+      "bytes": 5168733
+    },
+    {
+      "year": 2024,
+      "filename": "price_daily/year=2024/part-000.parquet",
+      "bytes": 5147292
+    },
+    {
+      "year": 2025,
+      "filename": "price_daily/year=2025/part-000.parquet",
+      "bytes": 4670936
+    }
+  ],
+  "normalized_output": {
+    "path": "data/real/finsaber_prices.parquet",
+    "bytes": 183574976,
+    "sha256": "9c393c8450a28a7602491cd949ff8fc4c404bc29f4fd03b4f920ad514eec7c60",
+    "schema": [
+      "ticker",
+      "date",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume",
+      "raw_close",
+      "cik",
+      "source_year"
+    ]
+  },
+  "price_semantics": {
+    "open_high_low_close": "split/dividend-adjusted with one adjusted_close/raw_close factor applied consistently to raw O/H/L/C",
+    "raw_close": "upstream unadjusted close retained for as-reported share-count market-cap calculations",
+    "volume": "upstream raw volume",
+    "invalid_ohlc": "excluded from research and counted in yearly_normalization; run fails if exclusion ceiling is exceeded"
+  },
+  "research_note": "Historical S&P membership is applied separately; presence in FINSABER alone is not treated as index membership."
+}

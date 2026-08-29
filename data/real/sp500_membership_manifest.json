@@ -1,0 +1,17 @@
+{
+  "source": "hanshof/sp500_constituents",
+  "revision": "a91ef88fad5ace83bed1f3452f451247295bcd18",
+  "files": {
+    "historical": {
+      "path": "data/real/raw/sp_500_historical_components.csv",
+      "bytes": 6773869,
+      "source": "https://raw.githubusercontent.com/hanshof/sp500_constituents/a91ef88fad5ace83bed1f3452f451247295bcd18/sp_500_historical_components.csv"
+    },
+    "current": {
+      "path": "data/real/raw/sp500_constituents.csv",
+      "bytes": 59163,
+      "source": "https://raw.githubusercontent.com/hanshof/sp500_constituents/a91ef88fad5ace83bed1f3452f451247295bcd18/sp500_constituents.csv"
+    }
+  },
+  "note": "Historical snapshots are converted to [start_date,end_date) intervals before research."
+}

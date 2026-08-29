@@ -1,0 +1,76 @@
+{
+  "created_at_utc": "2026-08-29T17:35:27.733160+00:00",
+  "data": {
+    "finsaber_source_manifest": {
+      "bytes": 9510,
+      "path": "data/real/finsaber_price_manifest.json",
+      "sha256": "6f8602f741e8006c55f46583bdcc856997595af50a5ebb16a2bc86c47b4bd350"
+    },
+    "fundamentals": {
+      "bytes": 646193,
+      "path": "data/real/fundamentals.csv",
+      "sha256": "eac5c003db1b3599c28c5b6247946480439485b3e57d4c68f4f4815a5ff10032"
+    },
+    "prices": {
+      "bytes": 29703249,
+      "path": "data/real/research_prices.parquet",
+      "sha256": "ae0d4f00dc981c590ee7e2eddd94f36340e2be7052e45002399dad3e6b0aaca6"
+    },
+    "research_coverage": {
+      "bytes": 7350,
+      "path": "data/real/research_coverage.json",
+      "sha256": "e839fdfc1ea98f1463174fd804b0021c765a67cad0da2df0132d8b04d1c1de0f"
+    },
+    "universe": {
+      "bytes": 25711,
+      "path": "data/real/universe_intervals.csv",
+      "sha256": "74eadc642d8f66e2c6c46c760d2a1514f754a3432995857ae2cad293c39c299f"
+    }
+  },
+  "experiment_id": "4c32970901a4dbeb",
+  "git_commit": "f2f3825a684001a59e442696cc070d9ac8ddae5f",
+  "metadata": {
+    "bulk_price_source": "FINSABER-2 when supplied by the automated pipeline",
+    "selection_rule": "robustness score emphasizes OOS return, OOS Sharpe, neighboring parameters, validation sign, trade count and bootstrap CI",
+    "test_start": "2023-05-20",
+    "train_end": "2020-10-12",
+    "validation_end": "2023-05-19"
+  },
+  "name": "quality_dip_research",
+  "parameters": {
+    "drop_thresholds": [
+      -0.05,
+      -0.1,
+      -0.15,
+      -0.2
+    ],
+    "hold_days": [
+      5,
+      10,
+      20,
+      60
+    ],
+    "portfolio": {
+      "allow_overlapping_ticker": false,
+      "initial_cash": 10000.0,
+      "max_position_fraction": 0.1,
+      "max_positions": 10
+    },
+    "quality_percentiles": [
+      0.0,
+      0.5,
+      0.7,
+      0.8
+    ],
+    "stabilization": [
+      false,
+      true
+    ],
+    "variants": 384,
+    "wait_days": [
+      0,
+      1,
+      2
+    ]
+  }
+}

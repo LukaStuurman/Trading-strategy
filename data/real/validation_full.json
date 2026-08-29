@@ -1,0 +1,31 @@
+{
+  "errors": [],
+  "warnings": [
+    "fundamentals: debt_to_equity coverage is only 0.0%",
+    "fundamentals: current_ratio coverage is only 0.0%"
+  ],
+  "stats": {
+    "prices": {
+      "rows": 769637,
+      "tickers": 475,
+      "start": "2012-12-21",
+      "end": "2025-12-31",
+      "min_rows_per_ticker": 100,
+      "close_moves_over_300pct": 0
+    },
+    "fundamentals": {
+      "rows": 3432,
+      "tickers": 490,
+      "roe_coverage": 0.9991258741258742,
+      "fcf_margin_coverage": 0.9055944055944056,
+      "debt_to_equity_coverage": 0.0,
+      "current_ratio_coverage": 0.0,
+      "market_cap_coverage": 0.9571678321678322
+    },
+    "universe": {
+      "rows": 1172,
+      "tickers": 1126
+    }
+  },
+  "ok": true
+}
