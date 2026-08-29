@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/fetch-real-data.yml'
       - 'scripts/download_real_data.py'
+      - 'scripts/build_fundamentals.py'
       - 'scripts/build_sec_fundamentals.py'
       - 'scripts/build_universe.py'
       - 'scripts/validate_research_data.py'
@@ -40,13 +41,14 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-      - name: Download prices, S&P history and SEC Company Facts
+      - name: Download prices, S&P history and try exact SEC Company Facts
         env:
           SEC_USER_AGENT: Trading-strategy 32568576+LukaStuurman@users.noreply.github.com
         run: |
           python scripts/download_real_data.py \
             --tickers AAPL,MSFT,GOOGL,AMZN,META,NVDA,JPM,COST,HD,NKE \
-            --start 2000-01-01
+            --start 2000-01-01 \
+            --sec-soft-fail
 
       - name: Build historical universe intervals
         run: |
@@ -61,14 +63,15 @@ jobs:
             --universe data/real/universe_intervals.csv \
             --report data/real/validation_market.json
 
-      - name: Build point-in-time SEC fundamentals
+      - name: Build fundamentals with exact-SEC-first fallback
         run: |
-          python scripts/build_sec_fundamentals.py \
+          python scripts/build_fundamentals.py \
             --prices data/real/prices.csv \
             --output data/real/fundamentals.csv \
-            --audit data/real/fundamentals_audit.csv
+            --audit data/real/fundamentals_audit.csv \
+            --source data/real/fundamentals_source.json
 
-      - name: Validate full point-in-time research dataset
+      - name: Validate full causal research dataset
         run: |
           python scripts/validate_research_data.py \
             --prices data/real/prices.csv \
@@ -101,6 +104,7 @@ jobs:
             data/real/price_sources.json \
             data/real/fundamentals.csv \
             data/real/fundamentals_audit.csv \
+            data/real/fundamentals_source.json \
             data/real/universe_intervals.csv \
             data/real/validation_market.json \
             data/real/validation_full.json \
