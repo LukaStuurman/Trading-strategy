@@ -189,7 +189,7 @@ def prepare_features(prices: pd.DataFrame, fundamentals: pd.DataFrame, universe:
 
 def _empty_trades() -> pd.DataFrame:
     return pd.DataFrame(columns=[
-        "ticker", "signal_date", "signal_return", "quality_percentile",
+        "ticker", "cik", "signal_date", "signal_return", "quality_percentile",
         "fundamental_source", "fundamental_available_date", "entry_date",
         "entry_price", "exit_date", "exit_price", "gross_return", "net_return",
         "drop_threshold", "wait_days", "hold_days", "min_quality_percentile",
@@ -211,7 +211,7 @@ def generate_trades(prices: pd.DataFrame, fundamentals: pd.DataFrame, cfg: Quali
         & q_pct.notna()
         & (q_pct >= cfg.min_quality_percentile)
     )
-    signal_cols = ["ticker", "_instrument_id", "date", "daily_return", "quality_percentile", "close", "_ticker_row"]
+    signal_cols = ["ticker", "cik", "_instrument_id", "date", "daily_return", "quality_percentile", "close", "_ticker_row"]
     if "low" in features.columns:
         signal_cols.append("low")
     if "fundamental_source" in features.columns:
@@ -268,4 +268,4 @@ def generate_trades(prices: pd.DataFrame, fundamentals: pd.DataFrame, cfg: Quali
     signals["hold_days"] = cfg.hold_days
     signals["min_quality_percentile"] = cfg.min_quality_percentile
     signals["require_stabilization"] = cfg.require_stabilization
-    return signals[_empty_trades().columns.tolist()].sort_values(["signal_date", "ticker"]).reset_index(drop=True)
+    return signals[_empty_trades().columns.tolist()].sort_values(["signal_date", "ticker", "cik"]).reset_index(drop=True)
