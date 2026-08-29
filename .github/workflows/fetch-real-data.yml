@@ -42,7 +42,7 @@ jobs:
 
       - name: Download prices, S&P history and SEC Company Facts
         env:
-          SEC_USER_AGENT: Trading-strategy research https://github.com/LukaStuurman/Trading-strategy
+          SEC_USER_AGENT: Trading-strategy 32568576+LukaStuurman@users.noreply.github.com
         run: |
           python scripts/download_real_data.py \
             --tickers AAPL,MSFT,GOOGL,AMZN,META,NVDA,JPM,COST,HD,NKE \
