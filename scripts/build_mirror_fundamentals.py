@@ -57,7 +57,7 @@ def _metric_frame(facts: pd.DataFrame, candidates: list[str], flow: bool) -> pd.
         x[col] = pd.to_datetime(x.get(col), errors="coerce")
     x["val"] = pd.to_numeric(x["val"], errors="coerce")
     x = x.dropna(subset=["filed", "end", "val"])
-    # A fact should not describe a period materially after it was filed.  Seven
+    # A fact should not describe a period materially after it was filed. Seven
     # days permits benign timestamp/calendar differences without future leakage.
     x = x[x["end"] <= x["filed"] + pd.Timedelta(days=7)]
     if flow:
@@ -92,7 +92,7 @@ def _flow_snapshot(state: dict[tuple[pd.Timestamp, pd.Timestamp], tuple[int, int
         if 300 <= duration <= 400:
             annual.append((end, priority, value))
 
-    # SEC cash-flow and income facts are frequently YTD.  Consecutive contexts
+    # SEC cash-flow and income facts are frequently YTD. Consecutive contexts
     # with the same start date can be differenced into standalone quarters,
     # including Q4 = FY - Q3 YTD.
     for group in by_start.values():
@@ -153,10 +153,11 @@ def _instant_series(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
         filed = pd.Timestamp(filed)
         for row in group.itertuples(index=False):
             end = pd.Timestamp(row.end)
-            candidate = (int(row.priority), float(row.val))
-            current = state.get(end)
-            if current is None or candidate[0] <= current[0]:
-                state[end] = candidate
+            # _metric_frame already chose the preferred tag within this filing.
+            # A later filing must replace an older context even when the issuer
+            # changed to a lower-priority taxonomy tag; otherwise restatements or
+            # taxonomy migrations could freeze stale balances indefinitely.
+            state[end] = (int(row.priority), float(row.val))
         if not state:
             continue
         latest_end = max(state)
