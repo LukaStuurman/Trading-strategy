@@ -1,0 +1,100 @@
+name: Leveraged intraday research
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/intraday-leveraged.yml'
+      - 'scripts/run_intraday_leveraged_sweep.py'
+      - 'src/strategies/intraday_daily.py'
+      - 'scripts/download_finsaber_prices.py'
+      - 'scripts/download_sp500_membership.py'
+      - 'scripts/build_universe.py'
+      - 'src/data/universe.py'
+      - 'src/data/io.py'
+      - 'src/research/experiment.py'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+concurrency:
+  group: leveraged-intraday-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  intraday-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      HF_HOME: ${{ github.workspace }}/.hf-cache
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Cache FINSABER source partitions
+        uses: actions/cache@v4
+        with:
+          path: .hf-cache
+          key: finsaber-v2-prices-${{ runner.os }}-v1
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile intraday research code
+        run: python -m py_compile src/strategies/intraday_daily.py scripts/run_intraday_leveraged_sweep.py
+      - name: Download and pin FINSABER-2 prices
+        run: |
+          python scripts/download_finsaber_prices.py \
+            --start-year 2000 \
+            --end-year 2025 \
+            --output data/real/finsaber_prices.parquet \
+            --manifest data/real/finsaber_price_manifest.json \
+            --min-rows 4500000 \
+            --min-tickers 750 \
+            --max-invalid-ohlc-rows 1000
+      - name: Download historical S&P membership
+        run: |
+          python scripts/download_sp500_membership.py \
+            --output-dir data/real/raw \
+            --manifest data/real/sp500_membership_manifest.json
+      - name: Build historical universe intervals
+        run: |
+          python scripts/build_universe.py \
+            --history data/real/raw/sp_500_historical_components.csv \
+            --output data/real/universe_intervals.csv
+      - name: Run 6656 intraday signal variants and leverage sweep
+        run: |
+          python scripts/run_intraday_leveraged_sweep.py \
+            --prices data/real/finsaber_prices.parquet \
+            --universe data/real/universe_intervals.csv \
+            --output results/intraday_leveraged \
+            --train-end 2018-12-31 \
+            --validation-end 2021-12-31 \
+            --oos-end 2024-12-31
+      - name: Commit compact intraday research outputs
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/real/finsaber_price_manifest.json data/real/sp500_membership_manifest.json data/real/universe_intervals.csv
+          git add -f \
+            results/intraday_leveraged/signal_variant_sweep.csv \
+            results/intraday_leveraged/signal_leaderboard.csv \
+            results/intraday_leveraged/portfolio_policy_sweep.csv \
+            results/intraday_leveraged/portfolio_leaderboard.csv \
+            results/intraday_leveraged/family_champions.csv \
+            results/intraday_leveraged/top_strategy_trades.csv \
+            results/intraday_leveraged/experiment_manifest.json \
+            results/intraday_leveraged/intraday_report.md
+          if git diff --cached --quiet; then
+            echo 'No derived changes.'
+          else
+            git commit -m 'data: add leveraged intraday research results'
+            git pull --rebase origin main
+            git push
+          fi
