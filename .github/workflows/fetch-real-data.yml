@@ -16,6 +16,7 @@ on:
       - 'scripts/validate_research_data.py'
       - 'scripts/run_quality_dip_sweep.py'
       - 'scripts/run_outlier_sensitivity.py'
+      - 'scripts/run_portfolio_policy_sweep.py'
       - 'src/data/**'
       - 'src/research/**'
       - 'src/strategies/quality_bad_news.py'
@@ -148,6 +149,16 @@ jobs:
             --initial-capital 10000 \
             --max-positions 10 \
             --max-position-fraction 0.10
+      - name: Optimize portfolio sizing and capacity on train/validation only
+        run: |
+          python scripts/run_portfolio_policy_sweep.py \
+            --prices data/real/research_prices.parquet \
+            --trades results/quality_dip_real/top_variant_trades.csv \
+            --leaderboard results/quality_dip_real/leaderboard.csv \
+            --output results/quality_dip_real \
+            --initial-capital 10000 \
+            --train-end 2020-10-12 \
+            --validation-end 2023-05-19
       - name: Keep reproducible membership sources
         run: |
           cp data/real/raw/sp_500_historical_components.csv data/real/sp500_historical_components.csv
@@ -180,7 +191,13 @@ jobs:
             results/quality_dip_real/heatmap_oos_portfolio_sharpe.csv \
             results/quality_dip_real/price_outliers.csv \
             results/quality_dip_real/outlier_sensitivity.csv \
-            results/quality_dip_real/outlier_sensitivity.md
+            results/quality_dip_real/outlier_sensitivity.md \
+            results/quality_dip_real/portfolio_policy_sweep.csv \
+            results/quality_dip_real/portfolio_policy_report.md \
+            results/quality_dip_real/portfolio_policy_manifest.json \
+            results/quality_dip_real/heatmap_policy_validation_sharpe.csv \
+            results/quality_dip_real/heatmap_policy_oos_sharpe.csv \
+            results/quality_dip_real/top_policy_accepted_trades.csv
           if [ -f results/quality_dip_real/top_variant_trades.csv ]; then
             git add -f results/quality_dip_real/top_variant_trades.csv
           fi
