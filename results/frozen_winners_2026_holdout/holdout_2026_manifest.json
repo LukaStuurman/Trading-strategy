@@ -1,0 +1,9 @@
+{
+  "strategy_file": "strategies/frozen_intraday_winners_v2_2026-08-30.json",
+  "price_source": "Yahoo Finance chart v8 adjusted OHLC",
+  "selection_price_source": "FINSABER",
+  "scored_start": "2026-01-01",
+  "scored_end": "2026-08-28",
+  "no_retuning": true,
+  "round_trip_cost_bps": 20.0
+}

@@ -1,0 +1,23 @@
+{
+  "source": "Yahoo Finance chart v8",
+  "selection_source": "FINSABER",
+  "independent_price_source": true,
+  "tickers_requested": 503,
+  "tickers_succeeded": 494,
+  "failed_tickers": [
+    "BK",
+    "CTRA",
+    "DAY",
+    "FI",
+    "HOLX",
+    "IPG",
+    "K",
+    "MMC",
+    "WBA"
+  ],
+  "rows": 112486,
+  "first_date": "2025-10-01",
+  "last_date": "2026-08-28",
+  "scored_2026_last_date": "2026-08-28",
+  "adjustment": "OHLC adjusted with adjclose/close; volume inverse-adjusted"
+}
