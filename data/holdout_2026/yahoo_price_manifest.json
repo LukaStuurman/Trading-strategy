@@ -1,5 +1,5 @@
 {
-  "source": "Yahoo Finance chart v8",
+  "source": "Yahoo Finance chart v8 query1+query2 fallback",
   "selection_source": "FINSABER",
   "independent_price_source": true,
   "tickers_requested": 503,
