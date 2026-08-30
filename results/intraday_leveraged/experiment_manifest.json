@@ -1,0 +1,52 @@
+{
+  "name": "leveraged_intraday_daily_bar_research",
+  "data_rule": "historical S&P 500 membership; FINSABER adjusted OHLC; signal uses only prior-session data plus current open",
+  "execution_rule": "buy at current open and exit same session at conservative stop/target/close; if stop and target both touched, stop is assumed first",
+  "round_trip_cost_bps_per_notional": 20.0,
+  "base_signal_configs": 416,
+  "exit_policies": 16,
+  "signal_variants": 6656,
+  "policy_variants": 920,
+  "leverage_grid": [
+    1.0,
+    1.5,
+    2.0,
+    3.0,
+    4.0
+  ],
+  "max_positions_grid": [
+    3,
+    5,
+    10,
+    20
+  ],
+  "splits": {
+    "train": [
+      "2001-01-01",
+      "2018-12-31"
+    ],
+    "validation": [
+      "2019-01-01",
+      "2021-12-31"
+    ],
+    "oos": [
+      "2022-01-01",
+      "2024-12-31"
+    ],
+    "holdout": [
+      "2025-01-01",
+      "2025-12-31"
+    ]
+  },
+  "selection_rule": "signal and leverage/capacity rankings use train + validation only; OOS 2022-2024 and 2025 holdout never participate in ranking",
+  "families": [
+    "gap_down_reversal",
+    "gap_up_continuation",
+    "oversold_3d_reversal",
+    "oversold_5d_reversal",
+    "prior_day_crash_rebound",
+    "relative_weakness_reversal",
+    "strength_pullback",
+    "volatility_reversal"
+  ]
+}
