@@ -1,0 +1,61 @@
+{
+  "created_at": "2026-08-30",
+  "status": "research_candidates_not_live_rules",
+  "parent_baselines": "strategies/frozen_intraday_baselines_2026-08-30.json",
+  "selection_rule": "Ranked on 2021-2023 train plus 2024 validation only. 2025 is diagnostic and excluded from selection.",
+  "candidates": [
+    {
+      "name": "relative_weakness_reversal_candidate_v2",
+      "source_variant_id": "be957829cf82",
+      "policy_rank": 1,
+      "signal": {
+        "family": "relative_weakness_reversal",
+        "min_adv20": 50000000.0,
+        "prev_return_percentile_max": 0.10,
+        "gap_max": -0.04,
+        "mom3_max": -0.06,
+        "market_prev_return_max": 0.0
+      },
+      "exit": {"stop_loss": null, "take_profit": 0.10},
+      "portfolio": {"leverage": 3.0, "max_positions": 5},
+      "returns": {
+        "2021": 0.30540614821822976,
+        "2022": 0.4518027411432599,
+        "2023": 0.24633345766170778,
+        "2024_validation": 0.26651049593445686,
+        "2025_diagnostic": 0.7721716614103886
+      },
+      "2024_validation_sharpe": 1.328749642175269,
+      "2024_validation_max_drawdown": -0.054354161436575676,
+      "2025_diagnostic_sharpe": 1.987906230901425,
+      "2025_diagnostic_max_drawdown": -0.04361689733652707
+    },
+    {
+      "name": "gap_down_reversal_candidate_v2",
+      "source_variant_id": "3ab676842d5e",
+      "policy_rank": 3,
+      "signal": {
+        "family": "gap_down_reversal",
+        "min_adv20": 50000000.0,
+        "gap_max": -0.04,
+        "prev_return_max": -0.015,
+        "mom3_max": -0.06,
+        "market_prev_return_max": null
+      },
+      "exit": {"stop_loss": null, "take_profit": 0.08},
+      "portfolio": {"leverage": 2.75, "max_positions": 5},
+      "returns": {
+        "2021": 0.31462426720450987,
+        "2022": 0.2646827267729652,
+        "2023": 0.36248645383636435,
+        "2024_validation": 0.2839079858118021,
+        "2025_diagnostic": 0.6904009646155407
+      },
+      "2024_validation_sharpe": 1.4334240879131623,
+      "2024_validation_max_drawdown": -0.0877969860012856,
+      "2025_diagnostic_sharpe": 1.8372521955699133,
+      "2025_diagnostic_max_drawdown": -0.0584105206763571
+    }
+  ],
+  "warning": "These descendants were found after testing 5,184 nearby signal/exit variants and 2,232 portfolio policies. They require a newly unseen test before any live-use conclusion."
+}
