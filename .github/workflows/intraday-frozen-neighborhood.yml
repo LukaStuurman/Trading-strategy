@@ -1,0 +1,92 @@
+name: Frozen intraday neighborhood
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/intraday-frozen-neighborhood.yml'
+      - 'scripts/run_intraday_frozen_neighborhood.py'
+      - 'strategies/frozen_intraday_baselines_2026-08-30.json'
+      - 'scripts/run_intraday_recent_focus.py'
+      - 'src/strategies/intraday_daily.py'
+  workflow_dispatch:
+
+concurrency:
+  group: frozen-intraday-neighborhood-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  frozen-neighborhood-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      HF_HOME: ${{ github.workspace }}/.hf-cache
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Cache FINSABER source partitions
+        uses: actions/cache@v4
+        with:
+          path: .hf-cache
+          key: finsaber-v2-prices-${{ runner.os }}-v1
+      - name: Install dependencies
+        run: pip install -r requirements.txt tabulate>=0.9
+      - name: Compile frozen neighborhood research
+        run: python -m py_compile src/strategies/intraday_daily.py scripts/run_intraday_recent_focus.py scripts/run_intraday_frozen_neighborhood.py
+      - name: Download recent FINSABER-2 prices
+        run: |
+          python scripts/download_finsaber_prices.py \
+            --start-year 2020 \
+            --end-year 2025 \
+            --output data/real/finsaber_recent_prices.parquet \
+            --manifest data/real/finsaber_recent_price_manifest.json \
+            --min-rows 1000000 \
+            --min-tickers 650 \
+            --max-invalid-ohlc-rows 100
+      - name: Download historical S&P membership
+        run: |
+          python scripts/download_sp500_membership.py \
+            --output-dir data/real/raw \
+            --manifest data/real/sp500_membership_manifest.json
+      - name: Build historical universe intervals
+        run: |
+          python scripts/build_universe.py \
+            --history data/real/raw/sp_500_historical_components.csv \
+            --output data/real/universe_intervals.csv
+      - name: Run frozen neighborhood variants
+        run: |
+          python scripts/run_intraday_frozen_neighborhood.py \
+            --prices data/real/finsaber_recent_prices.parquet \
+            --universe data/real/universe_intervals.csv \
+            --output results/intraday_frozen_neighborhood
+      - name: Commit frozen neighborhood outputs
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f \
+            results/intraday_frozen_neighborhood/signal_neighborhood_sweep.csv \
+            results/intraday_frozen_neighborhood/signal_leaderboard.csv \
+            results/intraday_frozen_neighborhood/portfolio_neighborhood_sweep.csv \
+            results/intraday_frozen_neighborhood/portfolio_leaderboard.csv \
+            results/intraday_frozen_neighborhood/frozen_baseline_comparison.csv \
+            results/intraday_frozen_neighborhood/family_best.csv \
+            results/intraday_frozen_neighborhood/robust_shortlist.csv \
+            results/intraday_frozen_neighborhood/experiment_manifest.json \
+            results/intraday_frozen_neighborhood/neighborhood_report.md
+          if git diff --cached --quiet; then
+            echo 'No derived changes.'
+          else
+            git commit -m 'data: add frozen intraday neighborhood results'
+            git pull --rebase origin main
+            git push
+          fi
