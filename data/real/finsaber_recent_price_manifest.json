@@ -1,0 +1,154 @@
+{
+  "source": "FINSABER-2 official Hugging Face dataset",
+  "repo_id": "finsaber-team/FINSABER-V2-Data",
+  "revision": "68bb21ef1500591c6f81e0cb934bcf079e807e38",
+  "layout": "price_daily/year=YYYY/part-000.parquet",
+  "years": [
+    2020,
+    2025
+  ],
+  "rows": 1097549,
+  "tickers": 821,
+  "yearly_rows": {
+    "2020": 192830,
+    "2021": 189775,
+    "2022": 184075,
+    "2023": 179969,
+    "2024": 180072,
+    "2025": 170828
+  },
+  "yearly_normalization": {
+    "2020": {
+      "input_rows": 192830,
+      "invalid_date_rows": 0,
+      "out_of_partition_year_rows": 0,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "duplicate_instrument_date_rows": 0,
+      "conflicting_cik_ticker_date_groups": 0,
+      "output_rows": 192830
+    },
+    "2021": {
+      "input_rows": 189777,
+      "invalid_date_rows": 0,
+      "out_of_partition_year_rows": 0,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 2,
+      "duplicate_ticker_date_rows": 0,
+      "duplicate_instrument_date_rows": 0,
+      "conflicting_cik_ticker_date_groups": 0,
+      "output_rows": 189775
+    },
+    "2022": {
+      "input_rows": 184075,
+      "invalid_date_rows": 0,
+      "out_of_partition_year_rows": 0,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "duplicate_instrument_date_rows": 0,
+      "conflicting_cik_ticker_date_groups": 0,
+      "output_rows": 184075
+    },
+    "2023": {
+      "input_rows": 179969,
+      "invalid_date_rows": 0,
+      "out_of_partition_year_rows": 0,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "duplicate_instrument_date_rows": 0,
+      "conflicting_cik_ticker_date_groups": 0,
+      "output_rows": 179969
+    },
+    "2024": {
+      "input_rows": 180078,
+      "invalid_date_rows": 0,
+      "out_of_partition_year_rows": 0,
+      "invalid_base_rows": 6,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "duplicate_instrument_date_rows": 0,
+      "conflicting_cik_ticker_date_groups": 0,
+      "output_rows": 180072
+    },
+    "2025": {
+      "input_rows": 170828,
+      "invalid_date_rows": 0,
+      "out_of_partition_year_rows": 0,
+      "invalid_base_rows": 0,
+      "invalid_ohlc_rows": 0,
+      "duplicate_ticker_date_rows": 0,
+      "duplicate_instrument_date_rows": 0,
+      "conflicting_cik_ticker_date_groups": 0,
+      "output_rows": 170828
+    }
+  },
+  "normalization_totals": {
+    "invalid_ohlc_rows_excluded": 2,
+    "out_of_partition_year_rows_excluded": 0,
+    "duplicate_instrument_date_rows_excluded": 0,
+    "conflicting_cik_ticker_date_groups_preserved": 0,
+    "max_invalid_ohlc_rows": 100,
+    "max_out_of_partition_rows": 100000
+  },
+  "source_files": [
+    {
+      "year": 2020,
+      "filename": "price_daily/year=2020/part-000.parquet",
+      "bytes": 5595278
+    },
+    {
+      "year": 2021,
+      "filename": "price_daily/year=2021/part-000.parquet",
+      "bytes": 5648346
+    },
+    {
+      "year": 2022,
+      "filename": "price_daily/year=2022/part-000.parquet",
+      "bytes": 5350989
+    },
+    {
+      "year": 2023,
+      "filename": "price_daily/year=2023/part-000.parquet",
+      "bytes": 5168733
+    },
+    {
+      "year": 2024,
+      "filename": "price_daily/year=2024/part-000.parquet",
+      "bytes": 5147292
+    },
+    {
+      "year": 2025,
+      "filename": "price_daily/year=2025/part-000.parquet",
+      "bytes": 4670936
+    }
+  ],
+  "normalized_output": {
+    "path": "data/real/finsaber_recent_prices.parquet",
+    "bytes": 40552765,
+    "sha256": "d33c703cf40af9c38ff3d87a4a93351ae8b1001cc07dceba3b384fb40ecff84e",
+    "schema": [
+      "ticker",
+      "date",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume",
+      "raw_close",
+      "cik",
+      "source_year"
+    ]
+  },
+  "price_semantics": {
+    "open_high_low_close": "split/dividend-adjusted with one adjusted_close/raw_close factor applied consistently to raw O/H/L/C",
+    "raw_close": "upstream unadjusted close retained for as-reported share-count market-cap calculations",
+    "volume": "upstream raw volume",
+    "partitioning": "only rows whose trading-date year matches price_daily/year=YYYY are retained",
+    "identity": "rows are deduplicated by ticker+CIK+date; same-symbol different-CIK rows are preserved",
+    "invalid_ohlc": "excluded from research and counted in yearly_normalization; run fails if exclusion ceiling is exceeded"
+  },
+  "research_note": "Historical S&P membership is applied separately; presence in FINSABER alone is not treated as index membership."
+}

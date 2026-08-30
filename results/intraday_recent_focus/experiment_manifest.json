@@ -1,0 +1,49 @@
+{
+  "name": "recent_intraday_refinement_2021_2025",
+  "seed_reason": "families chosen because they remained positive/useful in the prior 2025 diagnostic study",
+  "data_window": [
+    "2021-01-01",
+    "2025-12-31"
+  ],
+  "feature_warmup_start": "2020-10-01",
+  "selection_train": [
+    "2021-01-01",
+    "2023-12-31"
+  ],
+  "selection_validation": [
+    "2024-01-01",
+    "2024-12-31"
+  ],
+  "diagnostic_2025": [
+    "2025-01-01",
+    "2025-12-31"
+  ],
+  "warning_2025": "2025 is not pristine because family choice was informed by the earlier 2025 study; it never participates in parameter or leverage ranking here",
+  "families": [
+    "gap_down_reversal",
+    "oversold_5d_reversal",
+    "relative_weakness_reversal"
+  ],
+  "base_configs": 1050,
+  "exit_policies": 30,
+  "signal_variants": 31500,
+  "policy_variants": 1848,
+  "cost_bps_round_trip_per_notional": 20.0,
+  "leverage_grid": [
+    1.0,
+    1.25,
+    1.5,
+    1.75,
+    2.0,
+    2.5,
+    3.0
+  ],
+  "max_positions_grid": [
+    3,
+    5,
+    7,
+    10,
+    15,
+    20
+  ]
+}
