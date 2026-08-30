@@ -1,0 +1,72 @@
+{
+  "frozen_at": "2026-08-30",
+  "status": "frozen_research_rules_for_unseen_2026_test",
+  "source": "results/intraday_frozen_neighborhood",
+  "selection_history": "Rules selected using FINSABER data from 2021-2024 only. 2025 was diagnostic and did not participate in ranking.",
+  "holdout_rule": "Do not alter any signal, exit, leverage, ranking or capacity parameter after inspecting 2026 results.",
+  "execution": {
+    "entry": "current session open",
+    "exit": "same-session take-profit if touched, otherwise close",
+    "stop_loss": null,
+    "round_trip_cost_bps_per_notional": 20.0,
+    "universe": "historical S&P 500 membership on each trade date"
+  },
+  "strategies": [
+    {
+      "name": "frozen_relative_weakness_reversal_v2",
+      "source_variant_id": "be957829cf82",
+      "family": "relative_weakness_reversal",
+      "signal": {
+        "min_adv20": 50000000.0,
+        "prev_return_percentile_max": 0.10,
+        "gap_max": -0.04,
+        "mom3_max": -0.06,
+        "market_prev_return_max": 0.0
+      },
+      "exit": {
+        "stop_loss": null,
+        "take_profit": 0.10
+      },
+      "portfolio": {
+        "leverage": 3.0,
+        "max_positions": 5
+      },
+      "pre_holdout_reference": {
+        "2021_return": 0.30540614821822976,
+        "2022_return": 0.4518027411432599,
+        "2023_return": 0.24633345766170778,
+        "2024_validation_return": 0.26651049593445686,
+        "2024_validation_sharpe": 1.328749642175269,
+        "2025_diagnostic_return": 0.7721716614103886
+      }
+    },
+    {
+      "name": "frozen_gap_down_reversal_v2",
+      "source_variant_id": "3ab676842d5e",
+      "family": "gap_down_reversal",
+      "signal": {
+        "min_adv20": 50000000.0,
+        "gap_max": -0.04,
+        "prev_return_max": -0.015,
+        "mom3_max": -0.06,
+        "market_prev_return_max": null
+      },
+      "exit": {
+        "stop_loss": null,
+        "take_profit": 0.08
+      },
+      "portfolio": {
+        "leverage": 2.75,
+        "max_positions": 5
+      },
+      "pre_holdout_reference": {
+        "2021_return": 0.31462426720450987,
+        "2022_return": 0.2646827267729652,
+        "2023_return": 0.36248645383636435,
+        "2024_validation_return": 0.2839079858118021,
+        "2024_validation_sharpe": 1.4334240879131623,
+        "2025_diagnostic_return": 0.6904009646155407
+      }
+    }
+  ]
+}
