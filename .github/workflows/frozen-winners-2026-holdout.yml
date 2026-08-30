@@ -1,0 +1,84 @@
+name: Frozen winners 2026 holdout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/frozen-winners-2026-holdout.yml'
+      - 'strategies/frozen_intraday_winners_v2_2026-08-30.json'
+      - 'scripts/download_yahoo_2026.py'
+      - 'scripts/run_frozen_winners_2026_holdout.py'
+      - 'src/strategies/intraday_daily.py'
+      - 'scripts/download_sp500_membership.py'
+      - 'scripts/build_universe.py'
+      - 'src/data/universe.py'
+      - 'src/data/io.py'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+concurrency:
+  group: frozen-winners-2026-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  holdout-2026:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile frozen holdout code
+        run: python -m py_compile scripts/download_yahoo_2026.py scripts/run_frozen_winners_2026_holdout.py src/strategies/intraday_daily.py
+      - name: Download current historical S&P membership
+        run: |
+          python scripts/download_sp500_membership.py \
+            --output-dir data/holdout_2026/raw \
+            --manifest data/holdout_2026/sp500_membership_manifest.json
+      - name: Build point-in-time universe
+        run: |
+          python scripts/build_universe.py \
+            --history data/holdout_2026/raw/sp_500_historical_components.csv \
+            --output data/holdout_2026/universe_intervals.csv
+      - name: Download independent Yahoo prices
+        run: |
+          python scripts/download_yahoo_2026.py \
+            --universe data/holdout_2026/universe_intervals.csv \
+            --output data/holdout_2026/yahoo_prices.parquet \
+            --manifest data/holdout_2026/yahoo_price_manifest.json
+      - name: Test frozen winners on 2026 only
+        run: |
+          python scripts/run_frozen_winners_2026_holdout.py \
+            --prices data/holdout_2026/yahoo_prices.parquet \
+            --universe data/holdout_2026/universe_intervals.csv \
+            --strategies strategies/frozen_intraday_winners_v2_2026-08-30.json \
+            --output results/frozen_winners_2026_holdout
+      - name: Commit holdout outputs
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/holdout_2026/sp500_membership_manifest.json data/holdout_2026/yahoo_price_manifest.json data/holdout_2026/universe_intervals.csv
+          git add -f \
+            results/frozen_winners_2026_holdout/holdout_2026_results.csv \
+            results/frozen_winners_2026_holdout/holdout_2026_trades.csv \
+            results/frozen_winners_2026_holdout/holdout_2026_report.md \
+            results/frozen_winners_2026_holdout/holdout_2026_manifest.json
+          if git diff --cached --quiet; then
+            echo 'No holdout changes.'
+          else
+            git commit -m 'data: add frozen winners independent 2026 holdout'
+            git pull --rebase origin main
+            git push
+          fi
