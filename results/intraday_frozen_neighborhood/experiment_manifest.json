@@ -1,0 +1,49 @@
+{
+  "name": "frozen_intraday_neighborhood_robustness",
+  "frozen_baselines_file": "strategies/frozen_intraday_baselines_2026-08-30.json",
+  "families": [
+    "gap_down_reversal",
+    "relative_weakness_reversal"
+  ],
+  "base_configs": 864,
+  "signal_variants": 5184,
+  "policy_variants": 2232,
+  "selection": "2021-2023 train + 2024 validation only; 2025 diagnostic excluded from ranking",
+  "stops": [
+    null
+  ],
+  "gap_targets": [
+    null,
+    0.04,
+    0.05,
+    0.06,
+    0.07,
+    0.08
+  ],
+  "relative_weakness_targets": [
+    null,
+    0.06,
+    0.07,
+    0.08,
+    0.09,
+    0.1
+  ],
+  "leverage_grid": [
+    1.0,
+    1.25,
+    1.5,
+    1.75,
+    2.0,
+    2.25,
+    2.5,
+    2.75,
+    3.0
+  ],
+  "max_positions_grid": [
+    3,
+    5,
+    7,
+    10
+  ],
+  "round_trip_cost_bps": 20.0
+}
