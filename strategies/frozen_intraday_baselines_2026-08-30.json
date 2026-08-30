@@ -1,0 +1,73 @@
+{
+  "frozen_at": "2026-08-30",
+  "purpose": "Immutable baselines for local robustness testing. Do not change these records when tuning variants.",
+  "selection_window": {
+    "train": ["2021-01-01", "2023-12-31"],
+    "validation": ["2024-01-01", "2024-12-31"],
+    "diagnostic_only": ["2025-01-01", "2025-12-31"]
+  },
+  "execution": {
+    "entry": "current session open",
+    "exit": "same session target or close",
+    "round_trip_cost_bps_per_notional": 20,
+    "universe": "historical S&P 500 membership",
+    "data": "FINSABER adjusted daily OHLC"
+  },
+  "strategies": [
+    {
+      "name": "frozen_gap_down_reversal_v1",
+      "source_variant_id": "2dcede8980c5",
+      "family": "gap_down_reversal",
+      "signal": {
+        "min_adv20": 50000000.0,
+        "gap_max": -0.04,
+        "prev_return_max": -0.02,
+        "mom3_max": -0.05,
+        "market_prev_return_max": null
+      },
+      "exit": {
+        "stop_loss": null,
+        "take_profit": 0.06
+      },
+      "portfolio": {
+        "leverage": 3.0,
+        "max_positions": 7
+      },
+      "observed_returns": {
+        "2021": 0.13542570866232073,
+        "2022": 0.20712232787424623,
+        "2023": 0.24323458755137706,
+        "2024": 0.1678300952065428,
+        "2025_diagnostic": 0.6448030257114172
+      }
+    },
+    {
+      "name": "frozen_relative_weakness_reversal_v1",
+      "source_variant_id": "6616ec9875f0",
+      "family": "relative_weakness_reversal",
+      "signal": {
+        "min_adv20": 50000000.0,
+        "prev_return_percentile_max": 0.15,
+        "gap_max": -0.04,
+        "mom3_max": -0.05,
+        "market_prev_return_max": 0.0
+      },
+      "exit": {
+        "stop_loss": null,
+        "take_profit": 0.08
+      },
+      "portfolio": {
+        "leverage": 2.5,
+        "max_positions": 5
+      },
+      "observed_returns": {
+        "2021": 0.15732709267393008,
+        "2022": 0.33210094583351646,
+        "2023": 0.20921973189166154,
+        "2024": 0.14367257457058424,
+        "2025_diagnostic": 0.7604884952955664
+      }
+    }
+  ],
+  "anti_overfit_rule": "Rank all descendants using 2021-2024 only. Never use 2025 to choose signal thresholds, exit thresholds, leverage, capacity, or the winner."
+}
